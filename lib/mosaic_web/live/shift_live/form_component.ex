@@ -156,13 +156,13 @@ defmodule MosaicWeb.ShiftLive.FormComponent do
 
   defp form_to_event_attrs(params) do
     %{
-      start_time: parse_datetime(params["start_time"]),
-      end_time: parse_datetime(params["end_time"]),
-      status: params["status"] || "draft",
-      auto_generate_periods: params["auto_generate_periods"] == "true",
-      location: params["location"],
-      department: params["department"],
-      notes: params["notes"]
+      "start_time" => parse_datetime(params["start_time"]),
+      "end_time" => parse_datetime(params["end_time"]),
+      "status" => params["status"] || "draft",
+      "auto_generate_periods" => params["auto_generate_periods"] == "true",
+      "location" => params["location"],
+      "department" => params["department"],
+      "notes" => params["notes"]
     }
   end
 

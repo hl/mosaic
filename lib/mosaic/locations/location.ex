@@ -23,7 +23,7 @@ defmodule Mosaic.Locations.Location do
   """
   def changeset(%Entity{} = entity, attrs) do
     entity
-    |> Entity.changeset(Map.put(attrs, :entity_type, "location"))
+    |> Entity.changeset(Map.put(attrs, "entity_type", "location"))
     |> validate_location_properties()
   end
 

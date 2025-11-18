@@ -143,12 +143,12 @@ defmodule MosaicWeb.EmploymentLive.FormComponent do
 
   defp form_to_event_attrs(params) do
     %{
-      start_time: parse_datetime(params["start_time"]),
-      end_time: parse_datetime(params["end_time"]),
-      status: params["status"] || "draft",
-      role: params["role"],
-      contract_type: params["contract_type"],
-      salary: params["salary"]
+      "start_time" => parse_datetime(params["start_time"]),
+      "end_time" => parse_datetime(params["end_time"]),
+      "status" => params["status"] || "draft",
+      "role" => params["role"],
+      "contract_type" => params["contract_type"],
+      "salary" => params["salary"]
     }
   end
 

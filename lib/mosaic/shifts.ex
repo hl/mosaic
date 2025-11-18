@@ -28,19 +28,20 @@ defmodule Mosaic.Shifts do
            :ok <- validate_shift_in_employment(attrs, employment),
            :ok <- validate_no_shift_overlap(worker_id, attrs),
            {:ok, event_type} <- Events.get_event_type_by_name("shift"),
-           attrs <- Map.merge(attrs, %{event_type_id: event_type.id, parent_id: employment_id}),
+           attrs <-
+             Map.merge(attrs, %{"event_type_id" => event_type.id, "parent_id" => employment_id}),
            {:ok, shift} <- Events.create_event(attrs),
            participation_attrs <- %{
-             participant_id: worker_id,
-             event_id: shift.id,
-             participation_type: "worker",
-             properties: %{}
+             "participant_id" => worker_id,
+             "event_id" => shift.id,
+             "participation_type" => "worker",
+             "properties" => %{}
            },
            {:ok, participation} <-
              %Participation{}
              |> Participation.changeset(participation_attrs)
              |> Repo.insert() do
-        if attrs[:auto_generate_periods] || attrs["auto_generate_periods"] do
+        if attrs["auto_generate_periods"] || attrs[:auto_generate_periods] do
           case auto_generate_periods(shift, worker_id) do
             {:ok, _periods} -> {shift, participation}
             {:error, reason} -> Repo.rollback(reason)
@@ -64,7 +65,7 @@ defmodule Mosaic.Shifts do
            employment <- Events.get_event!(shift.parent_id, preload: [:event_type]),
            :ok <- validate_shift_in_employment(attrs, employment),
            worker_id <- get_worker_id(shift),
-           :ok <- validate_no_shift_overlap(worker_id, Map.put(attrs, :id, shift_id)),
+           :ok <- validate_no_shift_overlap(worker_id, Map.put(attrs, "id", shift_id)),
            {:ok, updated_shift} <- Events.update_event(shift, attrs) do
         updated_shift
       else

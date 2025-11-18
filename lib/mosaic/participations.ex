@@ -13,8 +13,8 @@ defmodule Mosaic.Participations do
   def add_participation(participant_id, event_id, attrs \\ %{}) do
     attrs =
       attrs
-      |> Map.put(:participant_id, participant_id)
-      |> Map.put(:event_id, event_id)
+      |> Map.put("participant_id", participant_id)
+      |> Map.put("event_id", event_id)
 
     %Participation{}
     |> Participation.changeset(attrs)

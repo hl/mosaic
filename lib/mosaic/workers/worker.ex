@@ -24,7 +24,7 @@ defmodule Mosaic.Workers.Worker do
   """
   def changeset(%Entity{} = entity, attrs) do
     entity
-    |> Entity.changeset(Map.put(attrs, :entity_type, "person"))
+    |> Entity.changeset(Map.put(attrs, "entity_type", "person"))
     |> validate_worker_properties()
   end
 

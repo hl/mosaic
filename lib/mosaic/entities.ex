@@ -56,7 +56,7 @@ defmodule Mosaic.Entities do
   consider creating a separate Workers context module.
   """
   def create_person(attrs \\ %{}) do
-    attrs_with_type = Map.put(attrs, :entity_type, "person")
+    attrs_with_type = Map.put(attrs, "entity_type", "person")
 
     %Entity{}
     |> Entity.changeset(attrs_with_type)

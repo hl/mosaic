@@ -24,15 +24,16 @@ defmodule Mosaic.Employments do
   def create_employment(worker_id, attrs \\ %{}) do
     Repo.transaction(fn ->
       with {:ok, event_type} <- Events.get_event_type_by_name("employment"),
-           attrs <- Map.put(attrs, :event_type_id, event_type.id),
+           attrs <- Map.put(attrs, "event_type_id", event_type.id),
            {:ok, event} <- Events.create_event(attrs),
            :ok <- validate_no_overlapping_employments(worker_id, event, nil),
            participation_attrs <- %{
-             participant_id: worker_id,
-             event_id: event.id,
-             participation_type: "employee",
-             role: attrs[:role] || attrs["role"],
-             properties: attrs[:participation_properties] || %{}
+             "participant_id" => worker_id,
+             "event_id" => event.id,
+             "participation_type" => "employee",
+             "role" => attrs["role"] || attrs[:role],
+             "properties" =>
+               attrs["participation_properties"] || attrs[:participation_properties] || %{}
            },
            {:ok, participation} <-
              %Participation{}

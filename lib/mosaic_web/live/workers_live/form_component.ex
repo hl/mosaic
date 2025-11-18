@@ -58,7 +58,7 @@ defmodule MosaicWeb.WorkersLive.FormComponent do
   defp save_worker(socket, :edit, worker_params) do
     properties = build_properties(worker_params)
 
-    case Workers.update_worker(socket.assigns.worker, %{properties: properties}) do
+    case Workers.update_worker(socket.assigns.worker, %{"properties" => properties}) do
       {:ok, worker} ->
         notify_parent({:saved, worker})
 
@@ -75,7 +75,7 @@ defmodule MosaicWeb.WorkersLive.FormComponent do
   defp save_worker(socket, :new, worker_params) do
     properties = build_properties(worker_params)
 
-    case Workers.create_worker(%{properties: properties}) do
+    case Workers.create_worker(%{"properties" => properties}) do
       {:ok, worker} ->
         notify_parent({:saved, worker})
 
