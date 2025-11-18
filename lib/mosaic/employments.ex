@@ -1,0 +1,199 @@
+defmodule Mosaic.Employments do
+  @moduledoc """
+  The Employments context handles employment period specific business logic.
+  """
+
+  import Ecto.Query, warn: false
+  alias Mosaic.Repo
+  alias Mosaic.{Event, Events, Participation}
+  alias Mosaic.EventTypes.Employment, as: EmploymentType
+
+  @doc """
+  Creates an employment period for a worker.
+  Returns {:ok, {event, participation}} or {:error, changeset}.
+
+  Attrs should include:
+  - start_time (required)
+  - end_time (optional)
+  - status (optional, defaults to "draft")
+  - role (optional, stored in participation)
+  - properties (optional, can include salary, contract_type, etc.)
+  """
+  def create_employment(worker_id, attrs \\ %{}) do
+    Repo.transaction(fn ->
+      with {:ok, event_type} <- Events.get_event_type_by_name("employment"),
+           attrs <- Map.put(attrs, :event_type_id, event_type.id),
+           {:ok, event} <- Events.create_event(attrs),
+           :ok <- validate_no_overlapping_employments(worker_id, event, nil),
+           participation_attrs <- %{
+             participant_id: worker_id,
+             event_id: event.id,
+             participation_type: "employee",
+             role: attrs[:role] || attrs["role"],
+             properties: attrs[:participation_properties] || %{}
+           },
+           {:ok, participation} <-
+             %Participation{}
+             |> Participation.changeset(participation_attrs)
+             |> Repo.insert() do
+        {event, participation}
+      else
+        {:error, reason} -> Repo.rollback(reason)
+      end
+    end)
+  end
+
+  @doc """
+  Updates an employment period.
+  """
+  def update_employment(employment_id, attrs) do
+    Repo.transaction(fn ->
+      with {:ok, employment} <- validate_employment(employment_id),
+           :ok <-
+             validate_no_overlapping_employments(
+               get_worker_id(employment),
+               employment,
+               employment_id
+             ),
+           {:ok, updated_employment} <- Events.update_event(employment, attrs) do
+        updated_employment
+      else
+        {:error, reason} -> Repo.rollback(reason)
+      end
+    end)
+  end
+
+  @doc """
+  Gets an employment by ID with preloaded associations.
+  """
+  def get_employment!(id) do
+    Events.get_event!(id, preload: [:event_type, :children, participations: :participant])
+  end
+
+  @doc """
+  Lists all employment periods.
+  """
+  def list_employments do
+    query =
+      from e in Event,
+        join: et in assoc(e, :event_type),
+        where: et.name == "employment",
+        order_by: [desc: e.start_time],
+        preload: [:event_type, participations: :participant]
+
+    Repo.all(query)
+  end
+
+  @doc """
+  Lists all employment periods for a worker.
+  """
+  def list_employments_for_worker(worker_id) do
+    query =
+      from e in Event,
+        join: et in assoc(e, :event_type),
+        join: p in assoc(e, :participations),
+        where: et.name == "employment" and p.participant_id == ^worker_id,
+        order_by: [desc: e.start_time],
+        preload: [:event_type, participations: :participant]
+
+    Repo.all(query)
+  end
+
+  @doc """
+  Counts active employments for a worker.
+  """
+  def count_active_employments(worker_id) do
+    query =
+      from e in Event,
+        join: et in assoc(e, :event_type),
+        join: p in assoc(e, :participations),
+        where:
+          et.name == "employment" and
+            p.participant_id == ^worker_id and
+            e.status == "active",
+        select: count(e.id)
+
+    Repo.one(query)
+  end
+
+  @doc """
+  Validates that a worker doesn't have overlapping active employment periods.
+  """
+  def validate_no_overlapping_employments(worker_id, employment, exclude_id) do
+    start_time = employment.start_time
+    end_time = employment.end_time
+
+    # Skip validation if start_time is nil - it will be caught by required validation
+    if is_nil(start_time) do
+      :ok
+    else
+      base_query =
+        from e in Event,
+          join: et in assoc(e, :event_type),
+          join: p in assoc(e, :participations),
+          where:
+            et.name == "employment" and
+              p.participant_id == ^worker_id and
+              e.status == "active"
+
+      # Build overlap condition based on whether end_time is nil
+      query =
+        if is_nil(end_time) do
+          # Employment has no end date (ongoing) - overlaps with anything that doesn't end before start
+          from [e, et, p] in base_query,
+            where: is_nil(e.end_time) or e.end_time > ^start_time
+        else
+          # Employment has both start and end - check for overlaps
+          from [e, et, p] in base_query,
+            where:
+              (is_nil(e.end_time) and e.start_time < ^end_time) or
+                (not is_nil(e.end_time) and
+                   not (e.end_time <= ^start_time or e.start_time >= ^end_time))
+        end
+
+      query =
+        if exclude_id do
+          from e in query, where: e.id != ^exclude_id
+        else
+          query
+        end
+
+      case Repo.one(from e in query, select: count(e.id)) do
+        0 -> :ok
+        _ -> {:error, "Worker has overlapping active employment periods"}
+      end
+    end
+  end
+
+  defp validate_employment(employment_id) do
+    try do
+      employment = Events.get_event!(employment_id, preload: [:event_type, :participations])
+
+      if employment.event_type.name == "employment" do
+        {:ok, employment}
+      else
+        {:error, "Event is not an employment period"}
+      end
+    rescue
+      Ecto.NoResultsError -> {:error, "Employment not found"}
+    end
+  end
+
+  defp get_worker_id(employment) do
+    employment
+    |> Repo.preload(:participations)
+    |> Map.get(:participations)
+    |> Enum.find(&(&1.participation_type == "employee"))
+    |> case do
+      nil -> nil
+      participation -> participation.participant_id
+    end
+  end
+
+  @doc """
+  Returns an `%Ecto.Changeset{}` for employment events with custom validations.
+  """
+  def change_employment(%Event{} = event, attrs \\ %{}) do
+    EmploymentType.changeset(event, attrs)
+  end
+end
