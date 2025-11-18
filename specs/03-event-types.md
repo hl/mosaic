@@ -4,6 +4,8 @@
 
 Event types define the polymorphic behavior system that allows different kinds of events to have custom validation, business logic, and properties while sharing a common data structure.
 
+**IMPORTANT:** The core `Event` schema (`Mosaic.Events.Event`) is completely **domain-agnostic**. It has zero knowledge of specific event types like shifts, employments, or breaks. Domain-specific logic lives in **wrapper modules** that build on top of the generic Event schema.
+
 ## Database Schema
 
 ```sql
@@ -55,12 +57,51 @@ Current event types in the system:
 - **Duration:** Minutes
 - **Special:** Has `is_paid` property
 
-## Protocol Pattern
+## Core Event Schema
 
-Event types implement custom logic through the `Mosaic.EventTypeBehaviour` protocol. This allows the system to dispatch to type-specific implementations without maintaining a registry of modules.
+The `Mosaic.Events.Event` schema is intentionally minimal and domain-agnostic:
 
 ```elixir
-defprotocol Mosaic.EventTypeBehaviour do
+defmodule Mosaic.Events.Event do
+  use Ecto.Schema
+  import Ecto.Changeset
+
+  schema "events" do
+    field :start_time, :utc_datetime
+    field :end_time, :utc_datetime
+    field :status, :string, default: "draft"
+    field :properties, :map, default: %{}
+
+    belongs_to :event_type, EventType
+    belongs_to :parent, __MODULE__
+    has_many :children, __MODULE__, foreign_key: :parent_id
+    has_many :participations, Participation
+
+    timestamps(type: :utc_datetime)
+  end
+
+  def changeset(event, attrs) do
+    # Generic validation only - no domain logic
+    event
+    |> cast(attrs, [:event_type_id, :parent_id, :start_time, :end_time, :status, :properties])
+    |> validate_required([:event_type_id, :start_time])
+    |> validate_time_order()
+    |> validate_inclusion(:status, ["draft", "active", "completed", "cancelled", "ended"])
+  end
+end
+```
+
+**Key Points:**
+- No knowledge of shifts, employments, or any specific event type
+- Only validates generic temporal and status rules
+- Domain-specific validation happens in wrapper modules
+
+## Protocol Pattern
+
+Event types implement custom logic through the `Mosaic.Events.EventTypeBehaviour` protocol. This allows the system to dispatch to type-specific implementations without maintaining a registry of modules.
+
+```elixir
+defprotocol Mosaic.Events.EventTypeBehaviour do
   @doc """
   Returns a changeset for the event with event type-specific validations.
   """
@@ -68,42 +109,52 @@ defprotocol Mosaic.EventTypeBehaviour do
   def changeset(event_type, event, attrs)
 end
 
-defimpl Mosaic.EventTypeBehaviour, for: Mosaic.EventType do
-  def changeset(%Mosaic.EventType{name: "shift"}, event, attrs) do
-    Mosaic.EventTypes.Shift.changeset(event, attrs)
+defimpl Mosaic.Events.EventTypeBehaviour, for: Mosaic.Events.EventType do
+  alias Mosaic.Events.Event
+
+  def changeset(%Mosaic.Events.EventType{name: "shift"}, event, attrs) do
+    Mosaic.Shifts.Shift.changeset(event, attrs)
   end
 
-  def changeset(%Mosaic.EventType{name: "employment"}, event, attrs) do
-    Mosaic.EventTypes.Employment.changeset(event, attrs)
+  def changeset(%Mosaic.Events.EventType{name: "employment"}, event, attrs) do
+    Mosaic.Employments.Employment.changeset(event, attrs)
   end
 
   # Fallback for event types without custom implementations
-  def changeset(%Mosaic.EventType{}, event, attrs) do
-    Mosaic.Event.changeset(event, attrs)
+  def changeset(%Mosaic.Events.EventType{}, event, attrs) do
+    Event.changeset(event, attrs)
   end
 end
 ```
 
+**This protocol-based wrapper pattern:**
+- Keeps core Event schema domain-agnostic
+- Dispatches to domain-specific wrappers (Shift, Employment)
+- Falls back to generic validation when no wrapper exists
+- Pattern matches on EventType.name to determine wrapper
+
 ### Implementing a New Event Type
 
-**Step 1: Create the module**
+To add a new event type (e.g., Time Off), follow these steps:
+
+**Step 1: Create wrapper module** (`lib/mosaic/time_off/time_off_event.ex`):
 
 ```elixir
-defmodule Mosaic.EventTypes.TimeOff do
+defmodule Mosaic.TimeOff.TimeOffEvent do
   @moduledoc """
-  Time off event type implementation.
+  Time off event type wrapper - adds time off-specific validation to Event.
   """
 
   import Ecto.Changeset
-  alias Mosaic.Event
+  alias Mosaic.Events.Event
 
   @property_fields [:reason, :approval_status, :approver_id]
 
   def changeset(event, attrs) do
     event
-    |> Event.changeset(attrs)
-    |> cast_properties(attrs)
-    |> validate_time_off_rules()
+    |> Event.changeset(attrs)  # Use core schema first
+    |> cast_properties(attrs)  # Add domain-specific properties
+    |> validate_time_off_rules()  # Add domain validation
   end
 
   defp cast_properties(changeset, attrs) do
@@ -122,7 +173,7 @@ defmodule Mosaic.EventTypes.TimeOff do
   end
 
   defp validate_time_off_rules(changeset) do
-    # Custom validation logic
+    # Custom validation logic (e.g., approval_status must be valid)
     changeset
   end
 end
@@ -130,24 +181,55 @@ end
 
 **Step 2: Add protocol implementation**
 
+Add pattern match clause in `lib/mosaic/events/event_type_behaviour.ex`:
+
 ```elixir
-# In lib/mosaic/event_type_behaviour.ex, add to the defimpl block:
-def changeset(%Mosaic.EventType{name: "time_off"}, event, attrs) do
-  Mosaic.EventTypes.TimeOff.changeset(event, attrs)
+defimpl Mosaic.Events.EventTypeBehaviour, for: Mosaic.Events.EventType do
+  # ... existing implementations ...
+
+  def changeset(%Mosaic.Events.EventType{name: "time_off"}, event, attrs) do
+    Mosaic.TimeOff.TimeOffEvent.changeset(event, attrs)
+  end
 end
 ```
 
-**Step 3: Seed the database**
+**Step 3: Create context module** (`lib/mosaic/time_off.ex`):
 
 ```elixir
-Repo.insert!(%EventType{
+defmodule Mosaic.TimeOff do
+  import Ecto.Query
+  alias Mosaic.Repo
+  alias Mosaic.Events
+
+  def list_time_off_requests do
+    Events.list_events_by_type("time_off",
+      preload: [:event_type, participations: :participant]
+    )
+  end
+
+  def create_time_off_request(attrs) do
+    Events.create_event(attrs)
+  end
+
+  # Additional business logic functions
+end
+```
+
+**Step 4: Seed the database**
+
+Add to seeds file:
+
+```elixir
+Repo.insert!(%Mosaic.Events.EventType{
   name: "time_off",
   category: "absence",
-  can_nest: true,
+  can_nest: false,
   can_have_children: false,
   requires_participation: true
 })
 ```
+
+**Step 5: No changes needed to core Event schema** - It remains domain-agnostic
 
 ## Type-Specific Properties
 
@@ -270,9 +352,58 @@ New event types are added without:
 - No polymorphic query penalties
 - Pattern matching is resolved at compile time
 
+## Architecture Summary
+
+The event type system follows a strict **domain-agnostic core with wrapper pattern**:
+
+```
+┌─────────────────────────────────────────────────────┐
+│              DOMAIN LAYER                            │
+│  (Event Type Wrappers)                              │
+├─────────────────────────────────────────────────────┤
+│  • Mosaic.Shifts.Shift                              │
+│  • Mosaic.Employments.Employment                    │
+│  • Mosaic.TimeOff.TimeOffEvent                      │
+│  • (Future event types...)                          │
+│                                                      │
+│  Each wrapper:                                      │
+│  1. Calls Event.changeset(event, attrs)             │
+│  2. Adds domain-specific property casting           │
+│  3. Adds domain-specific validation                 │
+└────────────────┬────────────────────────────────────┘
+                 ↓
+┌─────────────────────────────────────────────────────┐
+│              PROTOCOL LAYER                          │
+│  (Dispatch to Wrappers)                             │
+├─────────────────────────────────────────────────────┤
+│  Mosaic.Events.EventTypeBehaviour                   │
+│  • Pattern matches on EventType.name                │
+│  • Dispatches to appropriate wrapper                │
+│  • Falls back to generic Event.changeset/2          │
+└────────────────┬────────────────────────────────────┘
+                 ↓
+┌─────────────────────────────────────────────────────┐
+│              CORE LAYER                              │
+│  (Domain-Agnostic Event Schema)                     │
+├─────────────────────────────────────────────────────┤
+│  Mosaic.Events.Event                                │
+│  • Temporal fields (start_time, end_time)           │
+│  • Status field (draft, active, completed, etc.)    │
+│  • Generic properties (JSONB)                       │
+│  • NO knowledge of shifts, employments, etc.        │
+└─────────────────────────────────────────────────────┘
+```
+
+**Key Benefits:**
+- **Zero domain knowledge in core** - Event schema never changes for new types
+- **Protocol dispatch** - No manual registry maintenance
+- **Wrapper pattern** - Domain logic isolated in dedicated modules
+- **Extensible** - Add new event types without modifying core schemas
+
 ## See Also
 
-- [01-events-and-participations.md](01-events-and-participations.md) - Core event model
+- [01-events-and-participations.md](01-events-and-participations.md) - Core event model and domain-agnostic architecture
+- [02-entities.md](02-entities.md) - Entity wrapper pattern (parallel to event wrappers)
 - [08-properties-pattern.md](08-properties-pattern.md) - Detailed properties implementation
-- [05-employments.md](05-employments.md) - Employment event type
-- [06-shifts.md](06-shifts.md) - Shift event type
+- [05-employments.md](05-employments.md) - Employment event type wrapper
+- [06-shifts.md](06-shifts.md) - Shift event type wrapper

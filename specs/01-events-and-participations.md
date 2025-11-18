@@ -461,9 +461,218 @@ from e in Event,
 - Status field tracks lifecycle
 - Participations preserve who was involved and when
 
+## Architecture: Domain-Agnostic Core with Wrapper Contexts
+
+### Core Principle: Separation of Concerns
+
+The Mosaic system follows a strict architectural pattern where **core schemas are completely domain-agnostic** and **domain logic lives in wrapper contexts**.
+
+### Core Schemas (Domain-Agnostic)
+
+These three core schemas have **zero knowledge** of any business domain concepts:
+
+**Event** (`Mosaic.Events.Event`)
+- Generic temporal fact representation
+- Fields: `event_type_id`, `parent_id`, `start_time`, `end_time`, `status`, `properties`
+- No awareness of shifts, employments, or any specific event type
+- Located at: `lib/mosaic/events/event.ex`
+
+**Entity** (`Mosaic.Entities.Entity`)
+- Generic participant representation
+- Fields: `entity_type`, `properties`
+- No awareness of workers, locations, organizations, or any specific entity type
+- Only validates format (lowercase letters and underscores)
+- Located at: `lib/mosaic/entities/entity.ex`
+
+**Participation** (`Mosaic.Participations.Participation`)
+- Generic relationship between entities and events
+- Fields: `participant_id`, `event_id`, `participation_type`, `role`, `start_time`, `end_time`, `properties`
+- No awareness of specific participation types
+- Located at: `lib/mosaic/participations/participation.ex`
+
+### Domain Wrapper Pattern
+
+Domain-specific logic is implemented through **wrapper contexts** that build on top of core schemas:
+
+#### Event Type Wrappers
+
+Wrap the Event schema with domain-specific validation:
+
+**Shifts** (`Mosaic.Shifts.Shift`)
+```elixir
+defmodule Mosaic.Shifts.Shift do
+  import Ecto.Changeset
+  alias Mosaic.Events.Event
+
+  def changeset(event, attrs) do
+    event
+    |> Event.changeset(attrs)  # Use core schema
+    |> validate_shift_properties()  # Add domain validation
+  end
+end
+```
+
+**Employments** (`Mosaic.Employments.Employment`)
+- Wraps Event with employment-specific validation
+- Properties: `role`, `contract_type`, `salary`
+
+#### Entity Type Wrappers
+
+Wrap the Entity schema with domain-specific validation:
+
+**Workers** (`Mosaic.Workers.Worker`)
+```elixir
+defmodule Mosaic.Workers.Worker do
+  import Ecto.Changeset
+  alias Mosaic.Entities.Entity
+
+  def changeset(%Entity{} = entity, attrs) do
+    entity
+    |> Entity.changeset(Map.put(attrs, :entity_type, "person"))
+    |> validate_worker_properties()
+  end
+
+  defp validate_worker_properties(changeset) do
+    # Worker-specific validation: name, email, phone
+  end
+end
+```
+
+**Locations** (`Mosaic.Locations.Location`)
+```elixir
+defmodule Mosaic.Locations.Location do
+  import Ecto.Changeset
+  alias Mosaic.Entities.Entity
+
+  def changeset(%Entity{} = entity, attrs) do
+    entity
+    |> Entity.changeset(Map.put(attrs, :entity_type, "location"))
+    |> validate_location_properties()
+  end
+
+  defp validate_location_properties(changeset) do
+    # Location-specific validation: name, address, capacity
+  end
+end
+```
+
+### Context Modules
+
+Each domain wrapper has a corresponding context module for business operations:
+
+**Event Contexts:**
+- `Mosaic.Events` - Generic event operations (domain-agnostic)
+- `Mosaic.Shifts` - Shift-specific operations
+- `Mosaic.Employments` - Employment-specific operations
+
+**Entity Contexts:**
+- `Mosaic.Workers` - Worker CRUD and business logic
+- `Mosaic.Locations` - Location CRUD and business logic
+
+### Why This Pattern?
+
+**Database Integrity:**
+- Single `entities` table maintains referential integrity
+- `participations.participant_id` references `entities.id`
+- Cross-domain queries remain efficient (e.g., "all events for a location")
+
+**Domain Isolation:**
+- Core schemas can evolve without domain knowledge
+- New domains added without modifying core
+- Business logic changes don't pollute core schemas
+
+**Extensibility:**
+- Add new entity types by creating wrapper contexts
+- Add new event types by creating wrapper modules
+- No schema migrations for new domains
+
+**Type Safety:**
+- Wrapper contexts provide type-specific interfaces
+- Domain validation happens at the wrapper layer
+- Core schemas remain simple and generic
+
+### Example: Adding a New Entity Type
+
+To add Organizations as a new entity type:
+
+1. **Create wrapper module** (`lib/mosaic/organizations/organization.ex`):
+```elixir
+defmodule Mosaic.Organizations.Organization do
+  import Ecto.Changeset
+  alias Mosaic.Entities.Entity
+
+  def changeset(%Entity{} = entity, attrs) do
+    entity
+    |> Entity.changeset(Map.put(attrs, :entity_type, "organization"))
+    |> validate_organization_properties()
+  end
+
+  defp validate_organization_properties(changeset) do
+    # Validate: name, tax_id, contact_email
+  end
+end
+```
+
+2. **Create context module** (`lib/mosaic/organizations.ex`):
+```elixir
+defmodule Mosaic.Organizations do
+  import Ecto.Query
+  alias Mosaic.Repo
+  alias Mosaic.Entities.Entity
+  alias Mosaic.Organizations.Organization
+
+  def list_organizations do
+    from(e in Entity, where: e.entity_type == "organization")
+    |> Repo.all()
+  end
+
+  def create_organization(attrs) do
+    %Entity{}
+    |> Organization.changeset(attrs)
+    |> Repo.insert()
+  end
+end
+```
+
+3. **Create LiveView interface** for CRUD operations
+
+4. **No changes needed** to Entity schema or core system
+
+### Architecture Diagram
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    DOMAIN LAYER                              │
+│  (Business Logic & Domain-Specific Validation)              │
+├─────────────────────────────────────────────────────────────┤
+│                                                               │
+│  Event Wrappers:              Entity Wrappers:              │
+│  ┌──────────────┐             ┌──────────────┐             │
+│  │ Shifts       │             │ Workers      │             │
+│  │ Employments  │             │ Locations    │             │
+│  │ TimeOff      │             │ Organizations│             │
+│  └──────────────┘             └──────────────┘             │
+│         ↓                            ↓                       │
+├─────────────────────────────────────────────────────────────┤
+│                    CORE LAYER                                │
+│  (Domain-Agnostic Data Structures)                          │
+├─────────────────────────────────────────────────────────────┤
+│                                                               │
+│  ┌──────────┐      ┌──────────┐      ┌────────────────┐   │
+│  │  Event   │      │  Entity  │      │ Participation  │   │
+│  │          │      │          │      │                │   │
+│  │ Generic  │      │ Generic  │      │   Generic      │   │
+│  │ temporal │      │ participant      │   relationship │   │
+│  │   fact   │      │          │      │                │   │
+│  └──────────┘      └──────────┘      └────────────────┘   │
+│                                                               │
+└─────────────────────────────────────────────────────────────┘
+```
+
 ## Implementation Details
 
 See also:
+- [02-entities.md](02-entities.md) for entity wrapper pattern details
 - [03-event-types.md](03-event-types.md) for event type system
 - [08-properties-pattern.md](08-properties-pattern.md) for properties usage
 - [11-overlap-prevention.md](11-overlap-prevention.md) for temporal validation
