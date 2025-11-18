@@ -1,10 +1,10 @@
-defmodule Mosaic.EventTypes.Employment do
+defmodule Mosaic.Employments.Employment do
   @moduledoc """
   Employment-specific business logic and validations.
   """
 
   import Ecto.Changeset
-  alias Mosaic.Event
+  alias Mosaic.Events.Event
 
   # Define which properties should be exposed as form fields
   @property_fields [:role, :contract_type, :salary]

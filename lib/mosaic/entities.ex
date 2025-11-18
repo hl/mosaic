@@ -5,7 +5,7 @@ defmodule Mosaic.Entities do
 
   import Ecto.Query, warn: false
   alias Mosaic.Repo
-  alias Mosaic.Entity
+  alias Mosaic.Entities.Entity
 
   @doc """
   Returns the list of all entities.

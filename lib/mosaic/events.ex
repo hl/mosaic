@@ -6,7 +6,7 @@ defmodule Mosaic.Events do
 
   import Ecto.Query, warn: false
   alias Mosaic.Repo
-  alias Mosaic.{Event, EventType}
+  alias Mosaic.Events.{Event, EventType}
 
   @doc """
   Returns the list of events with optional filtering and preloading.
@@ -96,7 +96,7 @@ defmodule Mosaic.Events do
       id ->
         case Repo.get(EventType, id) do
           %EventType{} = event_type ->
-            Mosaic.EventTypeBehaviour.changeset(event_type, event, attrs)
+            Mosaic.Events.EventTypeBehaviour.changeset(event_type, event, attrs)
 
           nil ->
             Event.changeset(event, attrs)

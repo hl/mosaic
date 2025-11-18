@@ -22,7 +22,7 @@ defmodule MosaicWeb.WorkersLive.Index do
   defp apply_action(socket, :new, _params) do
     socket
     |> assign(:page_title, "New Worker")
-    |> assign(:worker, %Mosaic.Entity{entity_type: "person", properties: %{}})
+    |> assign(:worker, %Mosaic.Entities.Entity{entity_type: "person", properties: %{}})
   end
 
   defp apply_action(socket, :index, _params) do

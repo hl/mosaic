@@ -1,6 +1,9 @@
-defmodule Mosaic.Event do
+defmodule Mosaic.Events.Event do
   use Ecto.Schema
   import Ecto.Changeset
+
+  alias Mosaic.Events.EventType
+  alias Mosaic.Participations.Participation
 
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
@@ -11,11 +14,11 @@ defmodule Mosaic.Event do
     field :status, :string, default: "draft"
     field :properties, :map, default: %{}
 
-    belongs_to :event_type, Mosaic.EventType
-    belongs_to :parent, Mosaic.Event
+    belongs_to :event_type, EventType
+    belongs_to :parent, __MODULE__
 
-    has_many :children, Mosaic.Event, foreign_key: :parent_id
-    has_many :participations, Mosaic.Participation
+    has_many :children, __MODULE__, foreign_key: :parent_id
+    has_many :participations, Participation
 
     timestamps(type: :utc_datetime)
   end

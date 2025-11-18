@@ -1,4 +1,4 @@
-defprotocol Mosaic.EventTypeBehaviour do
+defprotocol Mosaic.Events.EventTypeBehaviour do
   @moduledoc """
   Protocol for event type-specific implementations.
   Each event type struct can implement this protocol to provide custom changeset logic.
@@ -14,27 +14,27 @@ defprotocol Mosaic.EventTypeBehaviour do
   def changeset(event_type, event, attrs)
 end
 
-defimpl Mosaic.EventTypeBehaviour, for: Mosaic.EventType do
+defimpl Mosaic.Events.EventTypeBehaviour, for: Mosaic.Events.EventType do
   @moduledoc """
   Protocol implementation that dispatches to event type-specific modules based on name.
   """
 
-  alias Mosaic.Event
+  alias Mosaic.Events.Event
 
   @doc """
   Dispatches to the appropriate event type module based on the EventType name.
   Falls back to generic Event.changeset if no specific implementation exists.
   """
-  def changeset(%Mosaic.EventType{name: "shift"}, event, attrs) do
-    Mosaic.EventTypes.Shift.changeset(event, attrs)
+  def changeset(%Mosaic.Events.EventType{name: "shift"}, event, attrs) do
+    Mosaic.Shifts.Shift.changeset(event, attrs)
   end
 
-  def changeset(%Mosaic.EventType{name: "employment"}, event, attrs) do
-    Mosaic.EventTypes.Employment.changeset(event, attrs)
+  def changeset(%Mosaic.Events.EventType{name: "employment"}, event, attrs) do
+    Mosaic.Employments.Employment.changeset(event, attrs)
   end
 
   # Fallback for event types without custom implementations
-  def changeset(%Mosaic.EventType{}, event, attrs) do
+  def changeset(%Mosaic.Events.EventType{}, event, attrs) do
     Event.changeset(event, attrs)
   end
 end

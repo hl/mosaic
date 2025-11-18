@@ -27,7 +27,7 @@
     <%= Calendar.strftime(@shift.end_time, "%H:%M") %>
   </:item>
   <:item title="Duration">
-    <%= format_duration(Mosaic.Event.duration_hours(@shift)) %>
+    <%= format_duration(Mosaic.Events.Event.duration_hours(@shift)) %>
   </:item>
   <:item title="Status"><%= @shift.status %></:item>
   <:item title="Location"><%= @shift.properties["location"] %></:item>
@@ -56,7 +56,7 @@
           </span>
         </div>
         <div class="flex-1 text-sm text-gray-600">
-          Duration: <%= format_duration(Mosaic.Event.duration_hours(child)) %>
+          Duration: <%= format_duration(Mosaic.Events.Event.duration_hours(child)) %>
         </div>
         <%= if child.event_type.name == "break" do %>
           <div class="text-xs text-gray-500">

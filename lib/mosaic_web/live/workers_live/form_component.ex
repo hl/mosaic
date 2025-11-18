@@ -103,7 +103,7 @@ defmodule MosaicWeb.WorkersLive.FormComponent do
     }
   end
 
-  defp worker_attrs_from_properties(%Mosaic.Entity{properties: properties}) do
+  defp worker_attrs_from_properties(%Mosaic.Entities.Entity{properties: properties}) do
     %{
       "name" => properties["name"],
       "email" => properties["email"],

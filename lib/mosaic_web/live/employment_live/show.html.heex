@@ -48,7 +48,7 @@
       <%= Calendar.strftime(shift.end_time, "%H:%M") %>
     </:col>
     <:col :let={shift} label="Duration">
-      <%= format_duration(Mosaic.Event.duration_hours(shift)) %>
+      <%= format_duration(Mosaic.Events.Event.duration_hours(shift)) %>
     </:col>
     <:col :let={shift} label="Status"><%= shift.status %></:col>
     <:col :let={shift} label="Location"><%= shift.properties["location"] %></:col>

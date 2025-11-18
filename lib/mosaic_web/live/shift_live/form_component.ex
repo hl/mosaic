@@ -57,7 +57,7 @@ defmodule MosaicWeb.ShiftLive.FormComponent do
         Shifts.change_shift(shift, shift_to_form_attrs(shift))
       else
         # For new shifts, create empty changeset without validation
-        Mosaic.Event.changeset(%Mosaic.Event{event_type_id: event_type.id}, %{})
+        Mosaic.Events.Event.changeset(%Mosaic.Events.Event{event_type_id: event_type.id}, %{})
       end
 
     {:ok,
@@ -83,7 +83,7 @@ defmodule MosaicWeb.ShiftLive.FormComponent do
         {:ok, event_type} = Mosaic.Events.get_event_type_by_name("shift")
 
         Shifts.change_shift(
-          %Mosaic.Event{event_type_id: event_type.id},
+          %Mosaic.Events.Event{event_type_id: event_type.id},
           form_to_event_attrs(merged_params)
         )
       end

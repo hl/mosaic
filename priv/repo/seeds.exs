@@ -11,7 +11,7 @@
 # and so on) as they will fail if something goes wrong.
 
 alias Mosaic.Repo
-alias Mosaic.EventType
+alias Mosaic.Events.EventType
 
 # Seed Event Types
 event_types = [

@@ -47,7 +47,7 @@ defmodule MosaicWeb.EmploymentLive.FormComponent do
         Employments.change_employment(employment, employment_to_form_attrs(employment))
       else
         # For new employments, create empty changeset without validation
-        Mosaic.Event.changeset(%Mosaic.Event{event_type_id: event_type.id}, %{})
+        Mosaic.Events.Event.changeset(%Mosaic.Events.Event{event_type_id: event_type.id}, %{})
       end
 
     {:ok,
@@ -76,7 +76,7 @@ defmodule MosaicWeb.EmploymentLive.FormComponent do
         {:ok, event_type} = Mosaic.Events.get_event_type_by_name("employment")
 
         Employments.change_employment(
-          %Mosaic.Event{event_type_id: event_type.id},
+          %Mosaic.Events.Event{event_type_id: event_type.id},
           form_to_event_attrs(merged_params)
         )
       end

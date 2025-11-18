@@ -1,6 +1,8 @@
-defmodule Mosaic.EventType do
+defmodule Mosaic.Events.EventType do
   use Ecto.Schema
   import Ecto.Changeset
+
+  alias Mosaic.Events.Event
 
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
@@ -15,7 +17,7 @@ defmodule Mosaic.EventType do
     field :rules, :map, default: %{}
     field :is_active, :boolean, default: true
 
-    has_many :events, Mosaic.Event
+    has_many :events, Event
 
     timestamps(type: :utc_datetime)
   end

@@ -1,6 +1,8 @@
-defmodule Mosaic.Entity do
+defmodule Mosaic.Entities.Entity do
   use Ecto.Schema
   import Ecto.Changeset
+
+  alias Mosaic.Participations.Participation
 
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
@@ -9,7 +11,7 @@ defmodule Mosaic.Entity do
     field :entity_type, :string
     field :properties, :map, default: %{}
 
-    has_many :participations, Mosaic.Participation, foreign_key: :participant_id
+    has_many :participations, Participation, foreign_key: :participant_id
 
     timestamps(type: :utc_datetime)
   end

@@ -6,8 +6,10 @@ defmodule Mosaic.Shifts do
 
   import Ecto.Query, warn: false
   alias Mosaic.Repo
-  alias Mosaic.{Event, Events, Participation}
-  alias Mosaic.EventTypes.Shift, as: ShiftType
+  alias Mosaic.Events.Event
+  alias Mosaic.Events
+  alias Mosaic.Participations.Participation
+  alias Mosaic.Shifts.Shift
 
   @doc """
   Creates a shift under an employment period.
@@ -413,6 +415,6 @@ defmodule Mosaic.Shifts do
   Returns an `%Ecto.Changeset{}` for shift events with custom validations.
   """
   def change_shift(%Event{} = event, attrs \\ %{}) do
-    ShiftType.changeset(event, attrs)
+    Shift.changeset(event, attrs)
   end
 end

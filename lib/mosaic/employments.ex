@@ -5,8 +5,10 @@ defmodule Mosaic.Employments do
 
   import Ecto.Query, warn: false
   alias Mosaic.Repo
-  alias Mosaic.{Event, Events, Participation}
-  alias Mosaic.EventTypes.Employment, as: EmploymentType
+  alias Mosaic.Events.Event
+  alias Mosaic.Events
+  alias Mosaic.Participations.Participation
+  alias Mosaic.Employments.Employment
 
   @doc """
   Creates an employment period for a worker.
@@ -194,6 +196,6 @@ defmodule Mosaic.Employments do
   Returns an `%Ecto.Changeset{}` for employment events with custom validations.
   """
   def change_employment(%Event{} = event, attrs \\ %{}) do
-    EmploymentType.changeset(event, attrs)
+    Employment.changeset(event, attrs)
   end
 end

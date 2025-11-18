@@ -5,7 +5,7 @@ defmodule Mosaic.Participations do
 
   import Ecto.Query, warn: false
   alias Mosaic.Repo
-  alias Mosaic.Participation
+  alias Mosaic.Participations.Participation
 
   @doc """
   Adds a participation linking an entity to an event.
