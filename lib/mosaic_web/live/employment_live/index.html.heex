@@ -1,0 +1,52 @@
+<div class="space-y-6">
+  <div class="flex items-center justify-between">
+    <p class="text-gray-600">All employment periods across workers</p>
+  </div>
+
+  <div class="bg-white rounded-lg shadow overflow-hidden">
+    <table class="min-w-full divide-y divide-gray-200">
+      <thead class="bg-gray-50">
+        <tr>
+          <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+            Worker
+          </th>
+          <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+            Start Date
+          </th>
+          <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+            End Date
+          </th>
+          <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+            Status
+          </th>
+          <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+            Actions
+          </th>
+        </tr>
+      </thead>
+      <tbody id="employments" phx-update="stream" class="bg-white divide-y divide-gray-200">
+        <tr :for={{dom_id, employment} <- @streams.employments} id={dom_id}>
+          <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+            {get_worker_name(employment)}
+          </td>
+          <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+            {Calendar.strftime(employment.start_time, "%b %d, %Y")}
+          </td>
+          <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+            {if employment.end_time, do: Calendar.strftime(employment.end_time, "%b %d, %Y"), else: "Ongoing"}
+          </td>
+          <td class="px-6 py-4 whitespace-nowrap">
+            <span class={"px-2 inline-flex text-xs leading-5 font-semibold rounded-full #{if employment.status == "active", do: "bg-green-100 text-green-800", else: "bg-gray-100 text-gray-800"}"}>
+              {employment.status}
+            </span>
+          </td>
+          <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
+            <.link navigate={~p"/employments/#{employment.id}"} class="text-indigo-600 hover:text-indigo-900">
+              View
+            </.link>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>

@@ -1,0 +1,64 @@
+<.header>
+  <%= @worker.properties["name"] %>
+  <:subtitle>Worker Details</:subtitle>
+  <:actions>
+    <.link patch={~p"/workers/#{@worker}/show/edit"} phx-click={JS.push_focus()}>
+      <.button>Edit worker</.button>
+    </.link>
+  </:actions>
+</.header>
+
+<.list>
+  <:item title="Name"><%= @worker.properties["name"] %></:item>
+  <:item title="Email"><%= @worker.properties["email"] %></:item>
+  <:item title="Phone"><%= @worker.properties["phone"] %></:item>
+</.list>
+
+<div class="mt-11">
+  <.header>
+    Employment Periods
+    <:actions>
+      <.link patch={~p"/workers/#{@worker}/show/new_employment"}>
+        <.button>New Employment Period</.button>
+      </.link>
+    </:actions>
+  </.header>
+
+  <.table id="employments" rows={@employments} row_click={fn employment -> JS.navigate(~p"/employments/#{employment}") end}>
+    <:col :let={employment} label="Start Date">
+      <%= Calendar.strftime(employment.start_time, "%Y-%m-%d") %>
+    </:col>
+    <:col :let={employment} label="End Date">
+      <%= if employment.end_time, do: Calendar.strftime(employment.end_time, "%Y-%m-%d"), else: "Ongoing" %>
+    </:col>
+    <:col :let={employment} label="Status"><%= employment.status %></:col>
+    <:col :let={employment} label="Role">
+      <%= get_in(employment.participations, [Access.at(0), Access.key(:role)]) %>
+    </:col>
+  </.table>
+</div>
+
+<.back navigate={~p"/workers"}>Back to workers</.back>
+
+<.modal :if={@live_action == :edit} id="worker-modal" show on_cancel={JS.patch(~p"/workers/#{@worker}")}>
+  <.live_component
+    module={MosaicWeb.WorkersLive.FormComponent}
+    id={@worker.id}
+    title={@page_title}
+    action={:edit}
+    worker={@worker}
+    patch={~p"/workers/#{@worker}"}
+  />
+</.modal>
+
+<.modal :if={@live_action == :new_employment} id="employment-modal" show on_cancel={JS.patch(~p"/workers/#{@worker}")}>
+  <.live_component
+    module={MosaicWeb.EmploymentLive.FormComponent}
+    id={:new}
+    title="New Employment Period"
+    action={:new}
+    worker_id={@worker.id}
+    employment={nil}
+    patch={~p"/workers/#{@worker}"}
+  />
+</.modal>

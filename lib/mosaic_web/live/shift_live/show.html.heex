@@ -1,0 +1,105 @@
+<.header>
+  Shift Details
+  <:subtitle>
+    <.link navigate={~p"/workers/#{@worker}"} class="text-blue-600 hover:underline">
+      <%= @worker.properties["name"] %>
+    </.link>
+    &gt;
+    <.link navigate={~p"/employments/#{@employment}"} class="text-blue-600 hover:underline">
+      Employment Period
+    </.link>
+  </:subtitle>
+  <:actions>
+    <.link patch={~p"/shifts/#{@shift}/show/edit"} phx-click={JS.push_focus()}>
+      <.button>Edit shift</.button>
+    </.link>
+  </:actions>
+</.header>
+
+<.list>
+  <:item title="Date">
+    <%= Calendar.strftime(@shift.start_time, "%Y-%m-%d") %>
+  </:item>
+  <:item title="Start Time">
+    <%= Calendar.strftime(@shift.start_time, "%H:%M") %>
+  </:item>
+  <:item title="End Time">
+    <%= Calendar.strftime(@shift.end_time, "%H:%M") %>
+  </:item>
+  <:item title="Duration">
+    <%= format_duration(Mosaic.Event.duration_hours(@shift)) %>
+  </:item>
+  <:item title="Status"><%= @shift.status %></:item>
+  <:item title="Location"><%= @shift.properties["location"] %></:item>
+  <:item title="Department"><%= @shift.properties["department"] %></:item>
+  <:item title="Notes"><%= @shift.properties["notes"] %></:item>
+</.list>
+
+<div class="mt-11">
+  <.header>
+    Timeline
+    <:subtitle>Work periods and breaks</:subtitle>
+  </.header>
+
+  <div class="mt-4 space-y-2">
+    <%= for child <- Enum.sort_by(@shift.children, & &1.start_time, DateTime) do %>
+      <div class="flex items-center gap-4 p-4 bg-gray-50 rounded-lg">
+        <div class="flex-none w-32 font-medium">
+          <%= Calendar.strftime(child.start_time, "%H:%M") %> - <%= Calendar.strftime(child.end_time, "%H:%M") %>
+        </div>
+        <div class="flex-none w-24">
+          <span class={[
+            "px-2 py-1 text-xs rounded-full",
+            if(child.event_type.name == "break", do: "bg-yellow-100 text-yellow-800", else: "bg-green-100 text-green-800")
+          ]}>
+            <%= child.event_type.name %>
+          </span>
+        </div>
+        <div class="flex-1 text-sm text-gray-600">
+          Duration: <%= format_duration(Mosaic.Event.duration_hours(child)) %>
+        </div>
+        <%= if child.event_type.name == "break" do %>
+          <div class="text-xs text-gray-500">
+            <%= if child.properties["is_paid"], do: "Paid", else: "Unpaid" %>
+          </div>
+        <% end %>
+      </div>
+    <% end %>
+  </div>
+</div>
+
+<div class="mt-11">
+  <.header>
+    Summary
+  </.header>
+
+  <dl class="mt-4 grid grid-cols-3 gap-4">
+    <div class="bg-blue-50 p-4 rounded-lg">
+      <dt class="text-sm font-medium text-blue-900">Total Worked Hours</dt>
+      <dd class="mt-1 text-2xl font-semibold text-blue-700"><%= format_duration(@worked_hours) %></dd>
+    </div>
+    <div class="bg-yellow-50 p-4 rounded-lg">
+      <dt class="text-sm font-medium text-yellow-900">Break Time</dt>
+      <dd class="mt-1 text-2xl font-semibold text-yellow-700"><%= format_duration(@break_hours) %></dd>
+    </div>
+    <div class="bg-green-50 p-4 rounded-lg">
+      <dt class="text-sm font-medium text-green-900">Net Working Time</dt>
+      <dd class="mt-1 text-2xl font-semibold text-green-700"><%= format_duration(@net_hours) %></dd>
+    </div>
+  </dl>
+</div>
+
+<.back navigate={~p"/employments/#{@employment}"}>Back to employment</.back>
+
+<.modal :if={@live_action == :edit} id="shift-modal" show on_cancel={JS.patch(~p"/shifts/#{@shift}")}>
+  <.live_component
+    module={MosaicWeb.ShiftLive.FormComponent}
+    id={@shift.id}
+    title="Edit Shift"
+    action={:edit}
+    employment_id={@employment.id}
+    worker_id={@worker.id}
+    shift={@shift}
+    patch={~p"/shifts/#{@shift}"}
+  />
+</.modal>

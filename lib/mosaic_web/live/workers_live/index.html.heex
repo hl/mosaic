@@ -1,0 +1,44 @@
+<.header>
+  Workers
+  <:actions>
+    <.link patch={~p"/workers/new"}>
+      <.button>New Worker</.button>
+    </.link>
+  </:actions>
+</.header>
+
+<.table
+  id="workers"
+  rows={@streams.workers}
+  row_click={fn {_id, worker} -> JS.navigate(~p"/workers/#{worker}") end}
+>
+  <:col :let={{_id, worker}} label="Name"><%= worker.properties["name"] %></:col>
+  <:col :let={{_id, worker}} label="Email"><%= worker.properties["email"] %></:col>
+  <:col :let={{_id, worker}} label="Phone"><%= worker.properties["phone"] %></:col>
+  <:col :let={{_id, worker}} label="Active Employments"><%= worker.active_employments_count %></:col>
+  <:action :let={{_id, worker}}>
+    <div class="sr-only">
+      <.link navigate={~p"/workers/#{worker}"}>Show</.link>
+    </div>
+    <.link patch={~p"/workers/#{worker}/edit"}>Edit</.link>
+  </:action>
+  <:action :let={{id, worker}}>
+    <.link
+      phx-click={JS.push("delete", value: %{id: worker.id}) |> hide("##{id}")}
+      data-confirm="Are you sure?"
+    >
+      Delete
+    </.link>
+  </:action>
+</.table>
+
+<.modal :if={@live_action in [:new, :edit]} id="worker-modal" show on_cancel={JS.patch(~p"/workers")}>
+  <.live_component
+    module={MosaicWeb.WorkersLive.FormComponent}
+    id={@worker.id || :new}
+    title={@page_title}
+    action={@live_action}
+    worker={@worker}
+    patch={~p"/workers"}
+  />
+</.modal>

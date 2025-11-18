@@ -1,0 +1,83 @@
+<.header>
+  Employment Period
+  <:subtitle>
+    <.link navigate={~p"/workers/#{@worker}"} class="text-blue-600 hover:underline">
+      <%= @worker.properties["name"] %>
+    </.link>
+  </:subtitle>
+  <:actions>
+    <.link patch={~p"/employments/#{@employment}/show/edit"} phx-click={JS.push_focus()}>
+      <.button>Edit employment</.button>
+    </.link>
+  </:actions>
+</.header>
+
+<.list>
+  <:item title="Start Date">
+    <%= Calendar.strftime(@employment.start_time, "%Y-%m-%d %H:%M") %>
+  </:item>
+  <:item title="End Date">
+    <%= if @employment.end_time, do: Calendar.strftime(@employment.end_time, "%Y-%m-%d %H:%M"), else: "Ongoing" %>
+  </:item>
+  <:item title="Status"><%= @employment.status %></:item>
+  <:item title="Role">
+    <%= get_in(@employment.participations, [Access.at(0), Access.key(:role)]) %>
+  </:item>
+  <:item title="Contract Type"><%= @employment.properties["contract_type"] %></:item>
+  <:item title="Salary"><%= @employment.properties["salary"] %></:item>
+</.list>
+
+<div class="mt-11">
+  <.header>
+    Shifts
+    <:actions>
+      <.link patch={~p"/employments/#{@employment}/show/new_shift"}>
+        <.button>New Shift</.button>
+      </.link>
+    </:actions>
+  </.header>
+
+  <.table id="shifts" rows={@shifts} row_click={fn shift -> JS.navigate(~p"/shifts/#{shift}") end}>
+    <:col :let={shift} label="Date">
+      <%= Calendar.strftime(shift.start_time, "%Y-%m-%d") %>
+    </:col>
+    <:col :let={shift} label="Start Time">
+      <%= Calendar.strftime(shift.start_time, "%H:%M") %>
+    </:col>
+    <:col :let={shift} label="End Time">
+      <%= Calendar.strftime(shift.end_time, "%H:%M") %>
+    </:col>
+    <:col :let={shift} label="Duration">
+      <%= format_duration(Mosaic.Event.duration_hours(shift)) %>
+    </:col>
+    <:col :let={shift} label="Status"><%= shift.status %></:col>
+    <:col :let={shift} label="Location"><%= shift.properties["location"] %></:col>
+  </.table>
+</div>
+
+<.back navigate={~p"/workers/#{@worker}"}>Back to worker</.back>
+
+<.modal :if={@live_action == :edit} id="employment-modal" show on_cancel={JS.patch(~p"/employments/#{@employment}")}>
+  <.live_component
+    module={MosaicWeb.EmploymentLive.FormComponent}
+    id={@employment.id}
+    title="Edit Employment Period"
+    action={:edit}
+    worker_id={@worker.id}
+    employment={@employment}
+    patch={~p"/employments/#{@employment}"}
+  />
+</.modal>
+
+<.modal :if={@live_action == :new_shift} id="shift-modal" show on_cancel={JS.patch(~p"/employments/#{@employment}")}>
+  <.live_component
+    module={MosaicWeb.ShiftLive.FormComponent}
+    id={:new}
+    title="New Shift"
+    action={:new}
+    employment_id={@employment.id}
+    worker_id={@worker.id}
+    shift={nil}
+    patch={~p"/employments/#{@employment}"}
+  />
+</.modal>

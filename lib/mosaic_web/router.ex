@@ -18,6 +18,25 @@ defmodule MosaicWeb.Router do
     pipe_through :browser
 
     get "/", PageController, :home
+
+    live "/workers", WorkersLive.Index, :index
+    live "/workers/new", WorkersLive.Index, :new
+    live "/workers/:id/edit", WorkersLive.Index, :edit
+
+    live "/workers/:id", WorkersLive.Show, :show
+    live "/workers/:id/show/edit", WorkersLive.Show, :edit
+    live "/workers/:id/show/new_employment", WorkersLive.Show, :new_employment
+
+    live "/employments", EmploymentLive.Index, :index
+
+    live "/employments/:id", EmploymentLive.Show, :show
+    live "/employments/:id/show/edit", EmploymentLive.Show, :edit
+    live "/employments/:id/show/new_shift", EmploymentLive.Show, :new_shift
+
+    live "/shifts", ShiftLive.Index, :index
+
+    live "/shifts/:id", ShiftLive.Show, :show
+    live "/shifts/:id/show/edit", ShiftLive.Show, :edit
   end
 
   # Other scopes may use custom stacks.
