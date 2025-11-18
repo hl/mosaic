@@ -76,29 +76,21 @@ defmodule Mosaic.Employments do
   Lists all employment periods.
   """
   def list_employments do
-    query =
-      from e in Event,
-        join: et in assoc(e, :event_type),
-        where: et.name == "employment",
-        order_by: [desc: e.start_time],
-        preload: [:event_type, participations: :participant]
-
-    Repo.all(query)
+    Events.list_events_by_type("employment",
+      preload: [:event_type, participations: :participant],
+      order_by: [desc: :start_time]
+    )
   end
 
   @doc """
   Lists all employment periods for a worker.
   """
   def list_employments_for_worker(worker_id) do
-    query =
-      from e in Event,
-        join: et in assoc(e, :event_type),
-        join: p in assoc(e, :participations),
-        where: et.name == "employment" and p.participant_id == ^worker_id,
-        order_by: [desc: e.start_time],
-        preload: [:event_type, participations: :participant]
-
-    Repo.all(query)
+    Events.list_events_for_participant("employment", worker_id,
+      preload: [:event_type, participations: :participant]
+    )
+    # Events.list_events_for_participant orders by asc, but we want desc for employments
+    |> Enum.reverse()
   end
 
   @doc """
@@ -168,28 +160,14 @@ defmodule Mosaic.Employments do
   end
 
   defp validate_employment(employment_id) do
-    try do
-      employment = Events.get_event!(employment_id, preload: [:event_type, :participations])
-
-      if employment.event_type.name == "employment" do
-        {:ok, employment}
-      else
-        {:error, "Event is not an employment period"}
-      end
-    rescue
-      Ecto.NoResultsError -> {:error, "Employment not found"}
-    end
+    Events.validate_event_type(employment_id, "employment",
+      preload: [:event_type, :participations]
+    )
   end
 
   defp get_worker_id(employment) do
-    employment
-    |> Repo.preload(:participations)
-    |> Map.get(:participations)
-    |> Enum.find(&(&1.participation_type == "employee"))
-    |> case do
-      nil -> nil
-      participation -> participation.participant_id
-    end
+    # Note: Employment uses "employee" instead of "worker" for participation_type
+    Events.get_participant_id(employment, "employee")
   end
 
   @doc """

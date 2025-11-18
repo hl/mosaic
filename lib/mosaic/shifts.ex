@@ -86,57 +86,34 @@ defmodule Mosaic.Shifts do
   Lists all shifts.
   """
   def list_shifts do
-    query =
-      from e in Event,
-        join: et in assoc(e, :event_type),
-        where: et.name == "shift",
-        order_by: [asc: e.start_time],
-        preload: [:event_type, :parent, :children, participations: :participant]
-
-    Repo.all(query)
+    Events.list_events_by_type("shift",
+      preload: [:event_type, :parent, :children, participations: :participant]
+    )
   end
 
   @doc """
   Lists all shifts under an employment period.
   """
   def list_shifts_for_employment(employment_id) do
-    query =
-      from e in Event,
-        join: et in assoc(e, :event_type),
-        where: et.name == "shift" and e.parent_id == ^employment_id,
-        order_by: [asc: e.start_time],
-        preload: [:event_type, :children, participations: :participant]
-
-    Repo.all(query)
+    from(e in Event,
+      join: et in assoc(e, :event_type),
+      where: et.name == "shift" and e.parent_id == ^employment_id,
+      order_by: [asc: e.start_time],
+      preload: [:event_type, :children, participations: :participant]
+    )
+    |> Repo.all()
   end
 
   @doc """
   Lists all shifts for a worker across all employments.
   """
   def list_shifts_for_worker(worker_id, opts \\ []) do
-    query =
-      from e in Event,
-        join: et in assoc(e, :event_type),
-        join: p in assoc(e, :participations),
-        where: et.name == "shift" and p.participant_id == ^worker_id,
-        order_by: [asc: e.start_time],
+    opts =
+      Keyword.merge(opts,
         preload: [:event_type, :parent, :children, participations: :participant]
+      )
 
-    query =
-      if date_from = opts[:date_from] do
-        from e in query, where: e.start_time >= ^date_from
-      else
-        query
-      end
-
-    query =
-      if date_to = opts[:date_to] do
-        from e in query, where: e.start_time <= ^date_to
-      else
-        query
-      end
-
-    Repo.all(query)
+    Events.list_events_for_participant("shift", worker_id, opts)
   end
 
   @doc """
@@ -373,42 +350,15 @@ defmodule Mosaic.Shifts do
   end
 
   defp validate_employment(employment_id) do
-    try do
-      employment = Events.get_event!(employment_id, preload: [:event_type])
-
-      if employment.event_type.name == "employment" do
-        {:ok, employment}
-      else
-        {:error, "Event is not an employment period"}
-      end
-    rescue
-      Ecto.NoResultsError -> {:error, "Employment not found"}
-    end
+    Events.validate_event_type(employment_id, "employment")
   end
 
   defp validate_shift(shift_id) do
-    try do
-      shift = Events.get_event!(shift_id, preload: [:event_type, :participations])
-
-      if shift.event_type.name == "shift" do
-        {:ok, shift}
-      else
-        {:error, "Event is not a shift"}
-      end
-    rescue
-      Ecto.NoResultsError -> {:error, "Shift not found"}
-    end
+    Events.validate_event_type(shift_id, "shift", preload: [:event_type, :participations])
   end
 
   defp get_worker_id(shift) do
-    shift
-    |> Repo.preload(:participations)
-    |> Map.get(:participations)
-    |> Enum.find(&(&1.participation_type == "worker"))
-    |> case do
-      nil -> nil
-      participation -> participation.participant_id
-    end
+    Events.get_participant_id(shift, "worker")
   end
 
   @doc """
