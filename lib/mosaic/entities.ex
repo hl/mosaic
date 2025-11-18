@@ -15,12 +15,20 @@ defmodule Mosaic.Entities do
   end
 
   @doc """
+  Returns the list of entities filtered by type.
+  """
+  def list_entities_by_type(entity_type) do
+    Entity
+    |> where([e], e.entity_type == ^entity_type)
+    |> Repo.all()
+  end
+
+  @doc """
   Returns the list of workers (entities with entity_type = "person").
+  This is a convenience function that delegates to list_entities_by_type.
   """
   def list_workers do
-    Entity
-    |> where([e], e.entity_type == "person")
-    |> Repo.all()
+    list_entities_by_type("person")
   end
 
   @doc """
@@ -42,13 +50,25 @@ defmodule Mosaic.Entities do
   end
 
   @doc """
+  Creates an entity of type "person".
+
+  Note: This is a convenience function. For domain-specific worker logic,
+  consider creating a separate Workers context module.
+  """
+  def create_person(attrs \\ %{}) do
+    attrs_with_type = Map.put(attrs, :entity_type, "person")
+
+    %Entity{}
+    |> Entity.changeset(attrs_with_type)
+    |> Repo.insert()
+  end
+
+  @doc """
   Creates a worker (entity with type "person").
-  Worker properties should include: name, email, phone.
+  Deprecated: Use create_person/1 instead, or create a Workers context.
   """
   def create_worker(attrs \\ %{}) do
-    %Entity{}
-    |> Entity.worker_changeset(attrs)
-    |> Repo.insert()
+    create_person(attrs)
   end
 
   @doc """
@@ -84,9 +104,10 @@ defmodule Mosaic.Entities do
   end
 
   @doc """
-  Returns an `%Ecto.Changeset{}` for tracking worker changes.
+  Returns an `%Ecto.Changeset{}` for tracking changes to a person entity.
+  Deprecated: Use change_entity/2 instead, or create a Workers context.
   """
   def change_worker(%Entity{} = entity, attrs \\ %{}) do
-    Entity.worker_changeset(entity, attrs)
+    Entity.changeset(entity, attrs)
   end
 end
