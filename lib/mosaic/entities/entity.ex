@@ -16,13 +16,13 @@ defmodule Mosaic.Entities.Entity do
     timestamps(type: :utc_datetime)
   end
 
-  @entity_types ~w(person organization location resource)
-
   @doc false
   def changeset(entity, attrs) do
     entity
     |> cast(attrs, [:entity_type, :properties])
     |> validate_required([:entity_type])
-    |> validate_inclusion(:entity_type, @entity_types)
+    |> validate_format(:entity_type, ~r/^[a-z_]+$/,
+      message: "must be lowercase letters and underscores only"
+    )
   end
 end
