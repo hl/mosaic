@@ -1,7 +1,7 @@
 defmodule MosaicWeb.WorkersLive.Index do
   use MosaicWeb, :live_view
 
-  alias Mosaic.{Entities, Employments}
+  alias Mosaic.{Workers, Employments}
 
   @impl true
   def mount(_params, _session, socket) do
@@ -16,7 +16,7 @@ defmodule MosaicWeb.WorkersLive.Index do
   defp apply_action(socket, :edit, %{"id" => id}) do
     socket
     |> assign(:page_title, "Edit Worker")
-    |> assign(:worker, Entities.get_entity!(id))
+    |> assign(:worker, Workers.get_worker!(id))
   end
 
   defp apply_action(socket, :new, _params) do
@@ -38,14 +38,14 @@ defmodule MosaicWeb.WorkersLive.Index do
 
   @impl true
   def handle_event("delete", %{"id" => id}, socket) do
-    worker = Entities.get_entity!(id)
-    {:ok, _} = Entities.delete_entity(worker)
+    worker = Workers.get_worker!(id)
+    {:ok, _} = Workers.delete_worker(worker)
 
     {:noreply, stream_delete(socket, :workers, worker)}
   end
 
   defp list_workers do
-    Entities.list_workers()
+    Workers.list_workers()
     |> Enum.map(fn worker ->
       active_employments = Employments.count_active_employments(worker.id)
       Map.put(worker, :active_employments_count, active_employments)

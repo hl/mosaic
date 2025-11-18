@@ -1,7 +1,7 @@
 defmodule MosaicWeb.WorkersLive.FormComponent do
   use MosaicWeb, :live_component
 
-  alias Mosaic.Entities
+  alias Mosaic.Workers
 
   @impl true
   def render(assigns) do
@@ -33,7 +33,7 @@ defmodule MosaicWeb.WorkersLive.FormComponent do
 
   @impl true
   def update(%{worker: worker} = assigns, socket) do
-    changeset = Entities.change_worker(worker, worker_attrs_from_properties(worker))
+    changeset = Workers.change_worker(worker, worker_attrs_from_properties(worker))
 
     {:ok,
      socket
@@ -45,7 +45,7 @@ defmodule MosaicWeb.WorkersLive.FormComponent do
   def handle_event("validate", %{"worker" => worker_params}, socket) do
     changeset =
       socket.assigns.worker
-      |> Entities.change_worker(build_properties(worker_params))
+      |> Workers.change_worker(build_properties(worker_params))
       |> Map.put(:action, :validate)
 
     {:noreply, assign_form(socket, changeset)}
@@ -58,7 +58,7 @@ defmodule MosaicWeb.WorkersLive.FormComponent do
   defp save_worker(socket, :edit, worker_params) do
     properties = build_properties(worker_params)
 
-    case Entities.update_entity(socket.assigns.worker, %{properties: properties}) do
+    case Workers.update_worker(socket.assigns.worker, %{properties: properties}) do
       {:ok, worker} ->
         notify_parent({:saved, worker})
 
@@ -75,7 +75,7 @@ defmodule MosaicWeb.WorkersLive.FormComponent do
   defp save_worker(socket, :new, worker_params) do
     properties = build_properties(worker_params)
 
-    case Entities.create_worker(%{properties: properties}) do
+    case Workers.create_worker(%{properties: properties}) do
       {:ok, worker} ->
         notify_parent({:saved, worker})
 
