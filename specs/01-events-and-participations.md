@@ -528,7 +528,7 @@ defmodule Mosaic.Workers.Worker do
 
   def changeset(%Entity{} = entity, attrs) do
     entity
-    |> Entity.changeset(Map.put(attrs, :entity_type, "person"))
+    |> Entity.changeset(Map.put(attrs, "entity_type", "person"))
     |> validate_worker_properties()
   end
 
@@ -546,7 +546,7 @@ defmodule Mosaic.Locations.Location do
 
   def changeset(%Entity{} = entity, attrs) do
     entity
-    |> Entity.changeset(Map.put(attrs, :entity_type, "location"))
+    |> Entity.changeset(Map.put(attrs, "entity_type", "location"))
     |> validate_location_properties()
   end
 
@@ -591,6 +591,32 @@ Each domain wrapper has a corresponding context module for business operations:
 - Domain validation happens at the wrapper layer
 - Core schemas remain simple and generic
 
+### Important Convention: String Keys
+
+**All attribute maps passed to Ecto changesets must use string keys, not atom keys.**
+
+This prevents `Ecto.CastError: expected params to be a map with atoms or string keys, got a map with mixed keys` errors.
+
+**Correct:**
+```elixir
+# Use string keys
+%{"entity_type" => "person", "properties" => %{"name" => "John"}}
+Map.put(attrs, "entity_type", "person")
+```
+
+**Incorrect:**
+```elixir
+# Don't mix atom and string keys
+%{:entity_type => "person", "properties" => %{"name" => "John"}}  # WRONG!
+Map.put(attrs, :entity_type, "person")  # WRONG if attrs has string keys!
+```
+
+This convention applies throughout:
+- Context functions (create_worker, create_employment, etc.)
+- Wrapper changesets (Worker.changeset, Location.changeset, etc.)
+- LiveView form components (form_to_event_attrs, etc.)
+- Participation attributes
+
 ### Example: Adding a New Entity Type
 
 To add Organizations as a new entity type:
@@ -603,7 +629,7 @@ defmodule Mosaic.Organizations.Organization do
 
   def changeset(%Entity{} = entity, attrs) do
     entity
-    |> Entity.changeset(Map.put(attrs, :entity_type, "organization"))
+    |> Entity.changeset(Map.put(attrs, "entity_type", "organization"))
     |> validate_organization_properties()
   end
 

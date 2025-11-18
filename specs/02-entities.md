@@ -82,7 +82,7 @@ defmodule Mosaic.Workers.Worker do
 
   def changeset(%Entity{} = entity, attrs) do
     entity
-    |> Entity.changeset(Map.put(attrs, :entity_type, "person"))
+    |> Entity.changeset(Map.put(attrs, "entity_type", "person"))
     |> validate_worker_properties()
   end
 
@@ -158,7 +158,7 @@ defmodule Mosaic.Locations.Location do
 
   def changeset(%Entity{} = entity, attrs) do
     entity
-    |> Entity.changeset(Map.put(attrs, :entity_type, "location"))
+    |> Entity.changeset(Map.put(attrs, "entity_type", "location"))
     |> validate_location_properties()
   end
 
@@ -254,7 +254,7 @@ defmodule Mosaic.Workers.Worker do
 
   def changeset(%Entity{} = entity, attrs) do
     entity
-    |> Entity.changeset(Map.put(attrs, :entity_type, "person"))
+    |> Entity.changeset(Map.put(attrs, "entity_type", "person"))
     |> validate_worker_properties()
   end
 
@@ -277,6 +277,7 @@ end
 - Then add domain-specific property validation
 - Each wrapper enforces its own required fields
 - Core Entity schema remains unaware of domain requirements
+- **IMPORTANT**: Use string keys (e.g., `"entity_type"`) not atom keys to avoid Ecto mixed key errors
 
 ## Relationship to Events
 
@@ -382,7 +383,7 @@ defmodule Mosaic.Organizations.Organization do
 
   def changeset(%Entity{} = entity, attrs) do
     entity
-    |> Entity.changeset(Map.put(attrs, :entity_type, "organization"))
+    |> Entity.changeset(Map.put(attrs, "entity_type", "organization"))
     |> validate_organization_properties()
   end
 
