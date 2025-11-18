@@ -206,28 +206,230 @@ Child events must fall within parent temporal bounds:
 
 ## Query Patterns
 
-### Finding Events by Type
+### Common Query Scenarios
+
+#### 1. All shifts for a specific person within a time period
+
+```elixir
+alias Mosaic.Events.Event
+alias Mosaic.Participations.Participation
+
+def get_worker_shifts(worker_id, start_date, end_date) do
+  from e in Event,
+    join: et in assoc(e, :event_type),
+    join: p in Participation,
+    on: p.event_id == e.id,
+    where: et.name == "shift",
+    where: p.participant_id == ^worker_id,
+    where: e.start_time >= ^start_date,
+    where: e.start_time <= ^end_date,
+    where: e.status != "cancelled",
+    order_by: [asc: e.start_time],
+    preload: [:event_type, participations: :participant]
+  |> Repo.all()
+end
+```
+
+#### 2. All shifts belonging to a specific employment period
+
+```elixir
+def get_employment_shifts(employment_id) do
+  from e in Event,
+    join: et in assoc(e, :event_type),
+    where: et.name == "shift",
+    where: e.parent_id == ^employment_id,
+    where: e.status != "cancelled",
+    order_by: [asc: e.start_time],
+    preload: [:event_type, :children, participations: :participant]
+  |> Repo.all()
+end
+```
+
+#### 3. Active employment for a worker
+
+```elixir
+def get_active_employment(worker_id) do
+  from e in Event,
+    join: et in assoc(e, :event_type),
+    join: p in Participation,
+    on: p.event_id == e.id,
+    where: et.name == "employment",
+    where: p.participant_id == ^worker_id,
+    where: e.status == "active",
+    where: is_nil(e.end_time) or e.end_time > ^DateTime.utc_now(),
+    order_by: [desc: e.start_time],
+    limit: 1,
+    preload: [:event_type, participations: :participant]
+  |> Repo.one()
+end
+```
+
+#### 4. Total hours worked by a person in a time period
+
+```elixir
+def calculate_hours_worked(worker_id, start_date, end_date) do
+  from e in Event,
+    join: et in assoc(e, :event_type),
+    join: p in Participation,
+    on: p.event_id == e.id,
+    join: wp in Event,
+    on: wp.parent_id == e.id,
+    join: wp_et in assoc(wp, :event_type),
+    where: et.name == "shift",
+    where: wp_et.name == "work_period",
+    where: p.participant_id == ^worker_id,
+    where: e.start_time >= ^start_date,
+    where: e.start_time <= ^end_date,
+    where: e.status in ["active", "completed"],
+    where: not is_nil(wp.start_time),
+    where: not is_nil(wp.end_time),
+    select: %{
+      total_seconds: fragment(
+        "SUM(EXTRACT(EPOCH FROM (? - ?)))",
+        wp.end_time,
+        wp.start_time
+      )
+    }
+  |> Repo.one()
+  |> case do
+    %{total_seconds: nil} -> 0.0
+    %{total_seconds: seconds} -> seconds / 3600
+  end
+end
+```
+
+#### 5. Find workers scheduled for a shift at a specific location
+
+```elixir
+def get_workers_at_location(location, date) do
+  from e in Event,
+    join: et in assoc(e, :event_type),
+    join: p in Participation,
+    on: p.event_id == e.id,
+    join: worker in Entity,
+    on: worker.id == p.participant_id,
+    where: et.name == "shift",
+    where: fragment("?->>? = ?", e.properties, "location", ^location),
+    where: fragment("DATE(?)", e.start_time) == ^date,
+    where: e.status != "cancelled",
+    select: %{
+      worker: worker,
+      shift_start: e.start_time,
+      shift_end: e.end_time
+    }
+  |> Repo.all()
+end
+```
+
+#### 6. Find all events for a person (across types)
+
+```elixir
+def get_all_worker_events(worker_id, opts \\ []) do
+  query =
+    from e in Event,
+      join: p in Participation,
+      on: p.event_id == e.id,
+      where: p.participant_id == ^worker_id,
+      order_by: [desc: e.start_time],
+      preload: [:event_type, :parent, participations: :participant]
+
+  query =
+    if start_date = opts[:start_date] do
+      where(query, [e], e.start_time >= ^start_date)
+    else
+      query
+    end
+
+  query =
+    if end_date = opts[:end_date] do
+      where(query, [e], e.start_time <= ^end_date)
+    else
+      query
+    end
+
+  query =
+    if event_type = opts[:event_type] do
+      from [e, p] in query,
+        join: et in assoc(e, :event_type),
+        where: et.name == ^event_type
+    else
+      query
+    end
+
+  Repo.all(query)
+end
+```
+
+#### 7. Check for scheduling conflicts (overlapping shifts)
+
+```elixir
+def has_scheduling_conflict?(worker_id, start_time, end_time, exclude_event_id \\ nil) do
+  query =
+    from e in Event,
+      join: et in assoc(e, :event_type),
+      join: p in Participation,
+      on: p.event_id == e.id,
+      where: et.name == "shift",
+      where: p.participant_id == ^worker_id,
+      where: e.status != "cancelled",
+      where: not is_nil(e.start_time),
+      where: not is_nil(e.end_time),
+      where:
+        (e.start_time <= ^start_time and e.end_time > ^start_time) or
+        (e.start_time < ^end_time and e.end_time >= ^end_time) or
+        (e.start_time >= ^start_time and e.end_time <= ^end_time)
+
+  query =
+    if exclude_event_id do
+      where(query, [e], e.id != ^exclude_event_id)
+    else
+      query
+    end
+
+  Repo.exists?(query)
+end
+```
+
+#### 8. Get shifts with their work periods and breaks
+
+```elixir
+def get_shift_details(shift_id) do
+  from e in Event,
+    where: e.id == ^shift_id,
+    preload: [
+      :event_type,
+      :parent,
+      children: [:event_type],
+      participations: [participant: [:participations]]
+    ]
+  |> Repo.one()
+end
+```
+
+### Generic Query Patterns
+
+#### Finding Events by Type
 ```elixir
 from e in Event,
   join: et in assoc(e, :event_type),
   where: et.name == "shift"
 ```
 
-### Finding Events for a Participant
+#### Finding Events for a Participant
 ```elixir
 from e in Event,
   join: p in assoc(e, :participations),
   where: p.participant_id == ^worker_id
 ```
 
-### Finding Events in Time Range
+#### Finding Events in Time Range
 ```elixir
 from e in Event,
   where: e.start_time >= ^start_date,
   where: e.start_time <= ^end_date
 ```
 
-### Finding Overlapping Events
+#### Finding Overlapping Events
 ```elixir
 from e in Event,
   where: not is_nil(e.start_time),
