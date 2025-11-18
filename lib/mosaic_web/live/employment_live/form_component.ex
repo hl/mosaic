@@ -1,6 +1,8 @@
 defmodule MosaicWeb.EmploymentLive.FormComponent do
   use MosaicWeb, :live_component
 
+  import MosaicWeb.LiveHelpers
+
   alias Mosaic.Employments
 
   @impl true
@@ -143,8 +145,8 @@ defmodule MosaicWeb.EmploymentLive.FormComponent do
 
   defp form_to_event_attrs(params) do
     %{
-      "start_time" => parse_datetime(params["start_time"]),
-      "end_time" => parse_datetime(params["end_time"]),
+      "start_time" => parse_datetime_local(params["start_time"]),
+      "end_time" => parse_datetime_local(params["end_time"]),
       "status" => params["status"] || "draft",
       "role" => params["role"],
       "contract_type" => params["contract_type"],
@@ -154,8 +156,8 @@ defmodule MosaicWeb.EmploymentLive.FormComponent do
 
   defp employment_to_form_attrs(employment) do
     %{
-      start_time: format_datetime(employment.start_time),
-      end_time: format_datetime(employment.end_time),
+      start_time: format_datetime_local(employment.start_time),
+      end_time: format_datetime_local(employment.end_time),
       status: employment.status,
       role: get_role(employment),
       contract_type: employment.properties["contract_type"],
@@ -168,34 +170,5 @@ defmodule MosaicWeb.EmploymentLive.FormComponent do
       [participation | _] -> participation.role
       _ -> nil
     end
-  end
-
-  defp parse_datetime(nil), do: nil
-  defp parse_datetime(""), do: nil
-
-  defp parse_datetime(datetime_string) when is_binary(datetime_string) do
-    # Browser sends datetime-local in format: "2025-11-19T14:47"
-    # Try parsing with and without seconds
-    case NaiveDateTime.from_iso8601(datetime_string <> ":00") do
-      {:ok, naive} ->
-        DateTime.from_naive!(naive, "Etc/UTC")
-
-      {:error, _} ->
-        case NaiveDateTime.from_iso8601(datetime_string) do
-          {:ok, naive} -> DateTime.from_naive!(naive, "Etc/UTC")
-          {:error, _} -> nil
-        end
-    end
-  end
-
-  defp parse_datetime(_), do: nil
-
-  defp format_datetime(nil), do: nil
-
-  defp format_datetime(%DateTime{} = dt) do
-    dt
-    |> DateTime.truncate(:second)
-    |> DateTime.to_naive()
-    |> NaiveDateTime.to_iso8601()
   end
 end

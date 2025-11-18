@@ -49,7 +49,8 @@ defmodule Mosaic.EmploymentsTest do
 
       attrs1 = %{
         "start_time" => now,
-        "end_time" => DateTime.add(now, 86400 * 365),  # 1 year
+        # 1 year
+        "end_time" => DateTime.add(now, 86400 * 365),
         "status" => "active"
       }
 
@@ -57,7 +58,8 @@ defmodule Mosaic.EmploymentsTest do
 
       # Try to create overlapping employment
       attrs2 = %{
-        "start_time" => DateTime.add(now, 86400 * 30),  # 30 days later
+        # 30 days later
+        "start_time" => DateTime.add(now, 86400 * 30),
         "end_time" => DateTime.add(now, 86400 * 400),
         "status" => "active"
       }
@@ -73,7 +75,8 @@ defmodule Mosaic.EmploymentsTest do
       # First employment
       attrs1 = %{
         "start_time" => now,
-        "end_time" => DateTime.add(now, 86400 * 30),  # Ends in 30 days
+        # Ends in 30 days
+        "end_time" => DateTime.add(now, 86400 * 30),
         "status" => "active"
       }
 
@@ -81,7 +84,8 @@ defmodule Mosaic.EmploymentsTest do
 
       # Second employment starts after first ends
       attrs2 = %{
-        "start_time" => DateTime.add(now, 86400 * 31),  # Starts in 31 days
+        # Starts in 31 days
+        "start_time" => DateTime.add(now, 86400 * 31),
         "status" => "active"
       }
 
@@ -94,9 +98,9 @@ defmodule Mosaic.EmploymentsTest do
       worker = worker_fixture()
       employment = employment_fixture(worker.id)
 
-      attrs = %{"status" => "ended"}
+      attrs = %{"status" => "completed"}
       assert {:ok, updated} = Employments.update_employment(employment.id, attrs)
-      assert updated.status == "ended"
+      assert updated.status == "completed"
     end
 
     test "prevents creating overlaps when updating" do
@@ -104,15 +108,17 @@ defmodule Mosaic.EmploymentsTest do
       now = DateTime.utc_now() |> DateTime.truncate(:second)
 
       # Create two non-overlapping employments
-      employment1 = employment_fixture(worker.id, %{
-        "start_time" => now,
-        "end_time" => DateTime.add(now, 86400 * 30)
-      })
+      employment1 =
+        employment_fixture(worker.id, %{
+          "start_time" => now,
+          "end_time" => DateTime.add(now, 86400 * 30)
+        })
 
-      employment2 = employment_fixture(worker.id, %{
-        "start_time" => DateTime.add(now, 86400 * 60),
-        "end_time" => DateTime.add(now, 86400 * 90)
-      })
+      employment2 =
+        employment_fixture(worker.id, %{
+          "start_time" => DateTime.add(now, 86400 * 60),
+          "end_time" => DateTime.add(now, 86400 * 90)
+        })
 
       # Try to extend employment1 to overlap with employment2
       attrs = %{"end_time" => DateTime.add(now, 86400 * 70)}
@@ -141,8 +147,8 @@ defmodule Mosaic.EmploymentsTest do
 
       now = DateTime.utc_now() |> DateTime.truncate(:second)
 
-      emp1 = employment_fixture(worker1, %{"start_time" => DateTime.add(now, -86400)})
-      emp2 = employment_fixture(worker2, %{"start_time" => now})
+      _emp1 = employment_fixture(worker1.id, %{"start_time" => DateTime.add(now, -86400)})
+      emp2 = employment_fixture(worker2.id, %{"start_time" => now})
 
       employments = Employments.list_employments()
       # Most recent first
@@ -174,7 +180,7 @@ defmodule Mosaic.EmploymentsTest do
 
       employment_fixture(worker.id, %{"status" => "active"})
       employment_fixture(worker.id, %{"status" => "active"})
-      employment_fixture(worker.id, %{"status" => "ended"})
+      employment_fixture(worker.id, %{"status" => "completed"})
 
       count = Employments.count_active_employments(worker.id)
       assert count == 2

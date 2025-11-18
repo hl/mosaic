@@ -52,10 +52,13 @@ defmodule Mosaic.Employments do
   def update_employment(employment_id, attrs) do
     Repo.transaction(fn ->
       with {:ok, employment} <- validate_employment(employment_id),
+           # Use changeset to get merged values for validation
+           changeset <- Event.changeset(employment, attrs),
+           merged_employment <- Ecto.Changeset.apply_changes(changeset),
            :ok <-
              validate_no_overlapping_employments(
                get_worker_id(employment),
-               employment,
+               merged_employment,
                employment_id
              ),
            {:ok, updated_employment} <- Events.update_event(employment, attrs) do
@@ -116,49 +119,49 @@ defmodule Mosaic.Employments do
   """
   def validate_no_overlapping_employments(worker_id, employment, exclude_id) do
     start_time = employment.start_time
-    end_time = employment.end_time
 
     # Skip validation if start_time is nil - it will be caught by required validation
     if is_nil(start_time) do
       :ok
     else
-      base_query =
-        from e in Event,
-          join: et in assoc(e, :event_type),
-          join: p in assoc(e, :participations),
-          where:
-            et.name == "employment" and
-              p.participant_id == ^worker_id and
-              e.status == "active"
-
-      # Build overlap condition based on whether end_time is nil
-      query =
-        if is_nil(end_time) do
-          # Employment has no end date (ongoing) - overlaps with anything that doesn't end before start
-          from [e, et, p] in base_query,
-            where: is_nil(e.end_time) or e.end_time > ^start_time
-        else
-          # Employment has both start and end - check for overlaps
-          from [e, et, p] in base_query,
-            where:
-              (is_nil(e.end_time) and e.start_time < ^end_time) or
-                (not is_nil(e.end_time) and
-                   not (e.end_time <= ^start_time or e.start_time >= ^end_time))
-        end
-
-      query =
-        if exclude_id do
-          from e in query, where: e.id != ^exclude_id
-        else
-          query
-        end
-
-      case Repo.one(from e in query, select: count(e.id)) do
-        0 -> :ok
+      with base_query <- build_base_employment_query(worker_id),
+           overlap_query <- build_overlap_query(base_query, start_time, employment.end_time),
+           final_query <- maybe_exclude_id(overlap_query, exclude_id),
+           0 <- Repo.one(from e in final_query, select: count(e.id)) do
+        :ok
+      else
         _ -> {:error, "Worker has overlapping active employment periods"}
       end
     end
   end
+
+  defp build_base_employment_query(worker_id) do
+    from e in Event,
+      join: et in assoc(e, :event_type),
+      join: p in assoc(e, :participations),
+      where:
+        et.name == "employment" and
+          p.participant_id == ^worker_id and
+          e.status == "active"
+  end
+
+  defp build_overlap_query(base_query, start_time, nil) do
+    # Employment has no end date (ongoing) - overlaps with anything that doesn't end before start
+    from [e, et, p] in base_query,
+      where: is_nil(e.end_time) or e.end_time > ^start_time
+  end
+
+  defp build_overlap_query(base_query, start_time, end_time) do
+    # Employment has both start and end - check for overlaps
+    from [e, et, p] in base_query,
+      where:
+        (is_nil(e.end_time) and e.start_time < ^end_time) or
+          (not is_nil(e.end_time) and
+             not (e.end_time <= ^start_time or e.start_time >= ^end_time))
+  end
+
+  defp maybe_exclude_id(query, nil), do: query
+  defp maybe_exclude_id(query, exclude_id), do: from(e in query, where: e.id != ^exclude_id)
 
   defp validate_employment(employment_id) do
     Events.validate_event_type(employment_id, "employment",

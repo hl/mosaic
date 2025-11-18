@@ -63,9 +63,17 @@ defmodule Mosaic.Shifts do
     Repo.transaction(fn ->
       with {:ok, shift} <- validate_shift(shift_id),
            employment <- Events.get_event!(shift.parent_id, preload: [:event_type]),
-           :ok <- validate_shift_in_employment(attrs, employment),
+           # Use changeset to get merged values for validation
+           changeset <- Event.changeset(shift, attrs),
+           merged_shift <- Ecto.Changeset.apply_changes(changeset),
+           merged_attrs <- %{
+             "start_time" => merged_shift.start_time,
+             "end_time" => merged_shift.end_time,
+             "id" => shift_id
+           },
+           :ok <- validate_shift_in_employment(merged_attrs, employment),
            worker_id <- get_worker_id(shift),
-           :ok <- validate_no_shift_overlap(worker_id, Map.put(attrs, "id", shift_id)),
+           :ok <- validate_no_shift_overlap(worker_id, merged_attrs),
            {:ok, updated_shift} <- Events.update_event(shift, attrs) do
         updated_shift
       else
@@ -178,12 +186,9 @@ defmodule Mosaic.Shifts do
         select: e
 
     Repo.all(query)
-    |> Enum.reduce(0, fn event, acc ->
-      case Event.duration_hours(event) do
-        nil -> acc
-        hours -> acc + hours
-      end
-    end)
+    |> Enum.map(&Event.duration_hours/1)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.sum()
   end
 
   @doc """
@@ -197,12 +202,9 @@ defmodule Mosaic.Shifts do
         select: e
 
     Repo.all(query)
-    |> Enum.reduce(0, fn event, acc ->
-      case Event.duration_hours(event) do
-        nil -> acc
-        hours -> acc + hours
-      end
-    end)
+    |> Enum.map(&Event.duration_hours/1)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.sum()
   end
 
   @doc """
@@ -228,12 +230,9 @@ defmodule Mosaic.Shifts do
         select: e
 
     Repo.all(query)
-    |> Enum.reduce(0, fn event, acc ->
-      case Event.duration_hours(event) do
-        nil -> acc
-        hours -> acc + hours
-      end
-    end)
+    |> Enum.map(&Event.duration_hours/1)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.sum()
   end
 
   @doc """
@@ -243,18 +242,21 @@ defmodule Mosaic.Shifts do
     shift_start = shift_attrs[:start_time] || shift_attrs["start_time"]
     shift_end = shift_attrs[:end_time] || shift_attrs["end_time"]
 
+    do_validate_shift_in_employment(shift_start, shift_end, employment)
+  end
+
+  defp do_validate_shift_in_employment(nil, _, _),
+    do: {:error, "Shift start time is required"}
+
+  defp do_validate_shift_in_employment(_, nil, _),
+    do: {:error, "Shift end time is required"}
+
+  defp do_validate_shift_in_employment(shift_start, shift_end, employment) do
     cond do
-      is_nil(shift_start) ->
-        {:error, "Shift start time is required"}
-
-      is_nil(shift_end) ->
-        {:error, "Shift end time is required"}
-
       DateTime.compare(shift_start, employment.start_time) == :lt ->
         {:error, "Shift starts before employment period"}
 
-      not is_nil(employment.end_time) and
-          DateTime.compare(shift_end, employment.end_time) == :gt ->
+      not is_nil(employment.end_time) and DateTime.compare(shift_end, employment.end_time) == :gt ->
         {:error, "Shift ends after employment period"}
 
       true ->
@@ -274,38 +276,39 @@ defmodule Mosaic.Shifts do
     if is_nil(shift_start) or is_nil(shift_end) do
       :ok
     else
-      base_query =
-        from e in Event,
-          join: et in assoc(e, :event_type),
-          join: p in assoc(e, :participations),
-          where:
-            et.name == "shift" and
-              p.participant_id == ^worker_id and
-              e.status != "cancelled"
-
-      # Build overlap query - shifts must have both start and end times
-      query =
-        from [e, et, p] in base_query,
-          where:
-            not is_nil(e.start_time) and
-              not is_nil(e.end_time) and
-              ((e.start_time <= ^shift_start and e.end_time > ^shift_start) or
-                 (e.start_time < ^shift_end and e.end_time >= ^shift_end) or
-                 (e.start_time >= ^shift_start and e.end_time <= ^shift_end))
-
-      query =
-        if shift_id do
-          from e in query, where: e.id != ^shift_id
-        else
-          query
-        end
-
-      case Repo.one(from e in query, select: count(e.id)) do
-        0 -> :ok
+      with base_query <- build_base_shift_query(worker_id),
+           overlap_query <- build_shift_overlap_query(base_query, shift_start, shift_end),
+           final_query <- maybe_exclude_shift_id(overlap_query, shift_id),
+           0 <- Repo.one(from e in final_query, select: count(e.id)) do
+        :ok
+      else
         _ -> {:error, "Worker has overlapping shifts"}
       end
     end
   end
+
+  defp build_base_shift_query(worker_id) do
+    from e in Event,
+      join: et in assoc(e, :event_type),
+      join: p in assoc(e, :participations),
+      where:
+        et.name == "shift" and
+          p.participant_id == ^worker_id and
+          e.status != "cancelled"
+  end
+
+  defp build_shift_overlap_query(base_query, shift_start, shift_end) do
+    from [e, et, p] in base_query,
+      where:
+        not is_nil(e.start_time) and
+          not is_nil(e.end_time) and
+          ((e.start_time <= ^shift_start and e.end_time > ^shift_start) or
+             (e.start_time < ^shift_end and e.end_time >= ^shift_end) or
+             (e.start_time >= ^shift_start and e.end_time <= ^shift_end))
+  end
+
+  defp maybe_exclude_shift_id(query, nil), do: query
+  defp maybe_exclude_shift_id(query, shift_id), do: from(e in query, where: e.id != ^shift_id)
 
   defp create_work_period(shift_id, worker_id, start_time, end_time, event_type_id) do
     with {:ok, event} <-

@@ -11,8 +11,9 @@ defmodule Mosaic.ParticipationsTest do
       event = event_fixture()
 
       attrs = %{"participation_type" => "worker"}
+
       assert {:ok, %Participation{} = participation} =
-        Participations.add_participation(worker.id, event.id, attrs)
+               Participations.add_participation(worker.id, event.id, attrs)
 
       assert participation.participant_id == worker.id
       assert participation.event_id == event.id
@@ -73,7 +74,9 @@ defmodule Mosaic.ParticipationsTest do
     test "deletes the participation" do
       worker = worker_fixture()
       event = event_fixture()
-      {:ok, participation} = Participations.add_participation(worker.id, event.id)
+
+      {:ok, participation} =
+        Participations.add_participation(worker.id, event.id, %{"participation_type" => "worker"})
 
       assert {:ok, %Participation{}} = Participations.remove_participation(participation)
     end
@@ -83,7 +86,9 @@ defmodule Mosaic.ParticipationsTest do
     test "returns the participation with given id" do
       worker = worker_fixture()
       event = event_fixture()
-      {:ok, participation} = Participations.add_participation(worker.id, event.id)
+
+      {:ok, participation} =
+        Participations.add_participation(worker.id, event.id, %{"participation_type" => "worker"})
 
       fetched = Participations.get_participation!(participation.id)
       assert fetched.id == participation.id
@@ -102,8 +107,11 @@ defmodule Mosaic.ParticipationsTest do
       worker1 = worker_fixture()
       worker2 = worker_fixture()
 
-      {:ok, p1} = Participations.add_participation(worker1.id, event.id)
-      {:ok, p2} = Participations.add_participation(worker2.id, event.id)
+      {:ok, p1} =
+        Participations.add_participation(worker1.id, event.id, %{"participation_type" => "worker"})
+
+      {:ok, p2} =
+        Participations.add_participation(worker2.id, event.id, %{"participation_type" => "worker"})
 
       participations = Participations.list_participations_for_event(event.id)
       p_ids = Enum.map(participations, & &1.id)
@@ -119,8 +127,11 @@ defmodule Mosaic.ParticipationsTest do
       event1 = event_fixture()
       event2 = event_fixture()
 
-      {:ok, p1} = Participations.add_participation(worker.id, event1.id)
-      {:ok, p2} = Participations.add_participation(worker.id, event2.id)
+      {:ok, p1} =
+        Participations.add_participation(worker.id, event1.id, %{"participation_type" => "worker"})
+
+      {:ok, p2} =
+        Participations.add_participation(worker.id, event2.id, %{"participation_type" => "worker"})
 
       participations = Participations.list_participations_for_entity(worker.id)
       p_ids = Enum.map(participations, & &1.id)

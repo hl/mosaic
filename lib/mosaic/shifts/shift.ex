@@ -4,6 +4,7 @@ defmodule Mosaic.Shifts.Shift do
   """
 
   import Ecto.Changeset
+  import Mosaic.ChangesetHelpers
   alias Mosaic.Events.Event
 
   # Define which properties should be exposed as form fields
@@ -16,33 +17,9 @@ defmodule Mosaic.Shifts.Shift do
   def changeset(event, attrs) do
     event
     |> Event.changeset(attrs)
-    |> cast_properties_as_virtuals(attrs)
+    |> cast_properties(attrs, @property_fields)
     |> validate_required([:end_time])
     |> validate_shift_properties()
-    |> sync_virtuals_to_properties()
-  end
-
-  # Cast property fields from attrs into the properties map
-  defp cast_properties_as_virtuals(changeset, attrs) do
-    properties = get_field(changeset, :properties, %{})
-
-    # Merge property fields from attrs into properties map
-    updated_properties =
-      Enum.reduce(@property_fields, properties, fn field, acc ->
-        field_str = to_string(field)
-
-        case Map.get(attrs, field) || Map.get(attrs, field_str) do
-          nil -> acc
-          value -> Map.put(acc, field_str, value)
-        end
-      end)
-
-    put_change(changeset, :properties, updated_properties)
-  end
-
-  # For display: add properties as virtual fields in changeset data
-  defp sync_virtuals_to_properties(changeset) do
-    changeset
   end
 
   defp validate_shift_properties(changeset) do
@@ -57,16 +34,6 @@ defmodule Mosaic.Shifts.Shift do
 
         changeset
         |> validate_property_presence(properties, "location", "Location is required")
-    end
-  end
-
-  defp validate_property_presence(changeset, properties, key, message) do
-    value = Map.get(properties, key)
-
-    if is_nil(value) || value == "" do
-      add_error(changeset, :properties, message, field: key)
-    else
-      changeset
     end
   end
 end

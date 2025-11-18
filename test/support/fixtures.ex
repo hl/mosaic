@@ -58,18 +58,46 @@ defmodule Mosaic.Fixtures do
   Creates an employment event with default or custom attributes.
 
   Requires a worker_id. Seeds event types if not already present.
+  Uses unique start times to avoid overlaps between test employments.
   """
   def employment_fixture(worker_id, attrs \\ %{}) do
     Seeds.seed_event_types()
 
-    default_attrs = %{
-      "start_time" => DateTime.utc_now() |> DateTime.truncate(:second),
-      "end_time" => nil,
-      "status" => "active",
-      "role" => "Employee",
-      "contract_type" => "full_time",
-      "salary" => "50000"
-    }
+    # Only use unique offset if start_time is not provided
+    default_attrs =
+      if Map.has_key?(attrs, "start_time") do
+        # User provided start_time, just set end_time if not provided
+        start_time = attrs["start_time"]
+
+        %{
+          "start_time" => start_time,
+          # 1 year duration
+          "end_time" => DateTime.add(start_time, 86400 * 365),
+          "status" => "active",
+          "role" => "Employee",
+          "contract_type" => "full_time",
+          "salary" => "50000"
+        }
+      else
+        # No start_time provided, generate unique one with large spacing
+        unique_offset = System.unique_integer([:positive, :monotonic]) |> rem(10000)
+
+        base_time =
+          DateTime.utc_now()
+          # 3-year spacing between employments
+          |> DateTime.add(unique_offset * 86400 * 1095)
+          |> DateTime.truncate(:second)
+
+        %{
+          "start_time" => base_time,
+          # 1 year duration
+          "end_time" => DateTime.add(base_time, 86400 * 365),
+          "status" => "active",
+          "role" => "Employee",
+          "contract_type" => "full_time",
+          "salary" => "50000"
+        }
+      end
 
     attrs = deep_merge(default_attrs, attrs)
 
@@ -83,22 +111,52 @@ defmodule Mosaic.Fixtures do
   Creates a shift event with default or custom attributes.
 
   Requires employment_id and worker_id. Seeds event types if not already present.
+  Uses unique start times to avoid overlaps between test shifts.
   """
   def shift_fixture(employment_id, worker_id, attrs \\ %{}) do
     Seeds.seed_event_types()
 
-    now = DateTime.utc_now() |> DateTime.truncate(:second)
+    # Get the employment to know its time bounds
+    alias Mosaic.{Events, Repo}
+    employment = Events.get_event!(employment_id) |> Repo.preload(:event_type)
 
-    default_attrs = %{
-      "start_time" => now,
-      # 8 hours later
-      "end_time" => DateTime.add(now, 8 * 3600),
-      "status" => "active",
-      "location" => "Main Office",
-      "department" => "Sales",
-      "notes" => "Test shift",
-      "auto_generate_periods" => false
-    }
+    # Only use unique offset if start_time is not provided
+    default_attrs =
+      if Map.has_key?(attrs, "start_time") do
+        # User provided start_time, just set end_time if not provided
+        start_time = attrs["start_time"]
+
+        %{
+          "start_time" => start_time,
+          # 8 hours later
+          "end_time" => DateTime.add(start_time, 8 * 3600),
+          "status" => "active",
+          "location" => "Main Office",
+          "department" => "Sales",
+          "notes" => "Test shift",
+          "auto_generate_periods" => false
+        }
+      else
+        # No start_time provided, generate unique one within employment period
+        # Use small offsets to ensure shifts stay within 1-year employment period
+        unique_offset = System.unique_integer([:positive, :monotonic]) |> rem(100)
+
+        # Start 7 days after employment start, with small offset (100 offsets * 1 day = 100 days max)
+        base_time =
+          DateTime.add(employment.start_time, 86400 * 7 + unique_offset * 86400)
+          |> DateTime.truncate(:second)
+
+        %{
+          "start_time" => base_time,
+          # 8 hours later
+          "end_time" => DateTime.add(base_time, 8 * 3600),
+          "status" => "active",
+          "location" => "Main Office",
+          "department" => "Sales",
+          "notes" => "Test shift",
+          "auto_generate_periods" => false
+        }
+      end
 
     attrs = deep_merge(default_attrs, attrs)
 
@@ -113,20 +171,45 @@ defmodule Mosaic.Fixtures do
 
   Requires event_type_id. Use this for creating custom event types
   or when you need more control than the domain-specific fixtures.
+  Uses unique timestamps to avoid potential overlaps.
   """
   def event_fixture(attrs \\ %{}) do
     Seeds.seed_event_types()
     event_type = Seeds.get_event_type!("shift")
 
+    unique_offset = System.unique_integer([:positive, :monotonic]) |> rem(100_000)
+
+    base_time =
+      DateTime.utc_now()
+      # Minutes in the future
+      |> DateTime.add(unique_offset * 60)
+      |> DateTime.truncate(:second)
+
     default_attrs = %{
       "event_type_id" => event_type.id,
-      "start_time" => DateTime.utc_now() |> DateTime.truncate(:second),
-      "end_time" => DateTime.utc_now() |> DateTime.add(3600) |> DateTime.truncate(:second),
+      "start_time" => base_time,
+      # 1 hour later
+      "end_time" => DateTime.add(base_time, 3600),
       "status" => "draft",
       "properties" => %{}
     }
 
     attrs = deep_merge(default_attrs, attrs)
+
+    # If start_time was provided, ensure end_time is after it
+    attrs =
+      if Map.has_key?(attrs, "start_time") do
+        start_time = attrs["start_time"]
+        end_time = Map.get(attrs, "end_time")
+
+        if is_nil(end_time) or DateTime.compare(end_time, start_time) != :gt do
+          Map.put(attrs, "end_time", DateTime.add(start_time, 3600))
+        else
+          attrs
+        end
+      else
+        attrs
+      end
 
     %Event{}
     |> Event.changeset(attrs)

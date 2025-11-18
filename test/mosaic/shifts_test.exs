@@ -15,10 +15,13 @@ defmodule Mosaic.ShiftsTest do
       worker = worker_fixture()
       employment = employment_fixture(worker.id)
 
-      now = DateTime.utc_now() |> DateTime.truncate(:second)
+      # Create shift within employment period (7 days after employment starts)
+      shift_start = DateTime.add(employment.start_time, 86400 * 7)
+
       attrs = %{
-        "start_time" => DateTime.add(now, 86400),
-        "end_time" => DateTime.add(now, 86400 + 28800),  # 8 hours
+        "start_time" => shift_start,
+        # 8 hours
+        "end_time" => DateTime.add(shift_start, 28800),
         "status" => "active",
         "location" => "Main Office",
         "department" => "Sales"
@@ -35,11 +38,13 @@ defmodule Mosaic.ShiftsTest do
       worker = worker_fixture()
       employment = employment_fixture(worker.id)
 
-      now = DateTime.utc_now() |> DateTime.truncate(:second)
+      # Start shift within employment period
+      shift_start = DateTime.add(employment.start_time, 86400 * 7)
 
       attrs1 = %{
-        "start_time" => DateTime.add(now, 86400),
-        "end_time" => DateTime.add(now, 86400 + 28800),  # 8 hours
+        "start_time" => shift_start,
+        # 8 hours
+        "end_time" => DateTime.add(shift_start, 28800),
         "status" => "active"
       }
 
@@ -47,8 +52,9 @@ defmodule Mosaic.ShiftsTest do
 
       # Try to create overlapping shift
       attrs2 = %{
-        "start_time" => DateTime.add(now, 86400 + 3600),  # Overlaps by starting during shift1
-        "end_time" => DateTime.add(now, 86400 + 32400),
+        # Overlaps by starting during shift1
+        "start_time" => DateTime.add(shift_start, 3600),
+        "end_time" => DateTime.add(shift_start, 32400),
         "status" => "active"
       }
 
@@ -60,12 +66,13 @@ defmodule Mosaic.ShiftsTest do
       worker = worker_fixture()
       employment = employment_fixture(worker.id)
 
-      now = DateTime.utc_now() |> DateTime.truncate(:second)
+      # Start shifts within employment period
+      shift_start = DateTime.add(employment.start_time, 86400 * 7)
 
       # First shift
       attrs1 = %{
-        "start_time" => DateTime.add(now, 86400),
-        "end_time" => DateTime.add(now, 86400 + 28800),
+        "start_time" => shift_start,
+        "end_time" => DateTime.add(shift_start, 28800),
         "status" => "active"
       }
 
@@ -73,8 +80,8 @@ defmodule Mosaic.ShiftsTest do
 
       # Second shift starts after first ends
       attrs2 = %{
-        "start_time" => DateTime.add(now, 86400 + 28800),
-        "end_time" => DateTime.add(now, 86400 + 57600),
+        "start_time" => DateTime.add(shift_start, 28800),
+        "end_time" => DateTime.add(shift_start, 57600),
         "status" => "active"
       }
 
@@ -85,11 +92,13 @@ defmodule Mosaic.ShiftsTest do
       worker = worker_fixture()
       employment = employment_fixture(worker.id)
 
-      now = DateTime.utc_now() |> DateTime.truncate(:second)
+      # Create shift within employment period
+      shift_start = DateTime.add(employment.start_time, 86400 * 7)
 
       attrs = %{
-        "start_time" => DateTime.add(now, 86400),
-        "end_time" => DateTime.add(now, 86400 + 28800),  # 8 hours
+        "start_time" => shift_start,
+        # 8 hours
+        "end_time" => DateTime.add(shift_start, 28800),
         "status" => "active",
         "auto_generate_periods" => true
       }
@@ -105,20 +114,24 @@ defmodule Mosaic.ShiftsTest do
       worker = worker_fixture()
       now = DateTime.utc_now() |> DateTime.truncate(:second)
 
-      employment = employment_fixture(worker.id, %{
-        "start_time" => DateTime.add(now, 86400 * 30),  # Starts in 30 days
-        "end_time" => DateTime.add(now, 86400 * 60)     # Ends in 60 days
-      })
+      employment =
+        employment_fixture(worker.id, %{
+          # Starts in 30 days
+          "start_time" => DateTime.add(now, 86400 * 30),
+          # Ends in 60 days
+          "end_time" => DateTime.add(now, 86400 * 60)
+        })
 
       # Try to create shift before employment starts
       attrs = %{
-        "start_time" => DateTime.add(now, 86400),  # Tomorrow (before employment)
+        # Tomorrow (before employment)
+        "start_time" => DateTime.add(now, 86400),
         "end_time" => DateTime.add(now, 86400 + 28800),
         "status" => "active"
       }
 
       assert {:error, reason} = Shifts.create_shift(employment.id, worker.id, attrs)
-      assert reason =~ "must be within the employment period"
+      assert reason =~ "before employment period"
     end
   end
 
@@ -136,21 +149,27 @@ defmodule Mosaic.ShiftsTest do
     test "prevents creating overlaps when updating" do
       worker = worker_fixture()
       employment = employment_fixture(worker.id)
-      now = DateTime.utc_now() |> DateTime.truncate(:second)
+      # Start shifts within employment period
+      shift_start = DateTime.add(employment.start_time, 86400 * 7)
 
       # Create two non-overlapping shifts
-      shift1 = shift_fixture(employment.id, worker.id, %{
-        "start_time" => DateTime.add(now, 86400),
-        "end_time" => DateTime.add(now, 86400 + 14400)  # 4 hours
-      })
+      shift1 =
+        shift_fixture(employment.id, worker.id, %{
+          "start_time" => shift_start,
+          # 4 hours
+          "end_time" => DateTime.add(shift_start, 14400)
+        })
 
-      _shift2 = shift_fixture(employment.id, worker.id, %{
-        "start_time" => DateTime.add(now, 86400 + 21600),  # 6 hours later
-        "end_time" => DateTime.add(now, 86400 + 36000)
-      })
+      _shift2 =
+        shift_fixture(employment.id, worker.id, %{
+          # 6 hours later
+          "start_time" => DateTime.add(shift_start, 21600),
+          "end_time" => DateTime.add(shift_start, 36000)
+        })
 
       # Try to extend shift1 to overlap with shift2
-      attrs = %{"end_time" => DateTime.add(now, 86400 + 25200)}  # Extend into shift2
+      # Extend into shift2
+      attrs = %{"end_time" => DateTime.add(shift_start, 25200)}
 
       assert {:error, reason} = Shifts.update_shift(shift1.id, attrs)
       assert reason =~ "overlapping"
@@ -230,22 +249,25 @@ defmodule Mosaic.ShiftsTest do
       worker = worker_fixture()
       employment = employment_fixture(worker.id)
 
-      now = DateTime.utc_now() |> DateTime.truncate(:second)
-      past = DateTime.add(now, -86400 * 10)
-      future = DateTime.add(now, 86400 * 10)
+      # Create shifts within employment period at different times
+      base = DateTime.add(employment.start_time, 86400 * 7)
+      # 3 days before base
+      past = DateTime.add(base, -86400 * 3)
+      # 3 days after base
+      future = DateTime.add(base, 86400 * 3)
 
-      _shift_past = shift_fixture(employment.id, worker.id, %{"start_time" => past})
-      shift_now = shift_fixture(employment.id, worker.id, %{"start_time" => now})
+      shift_past = shift_fixture(employment.id, worker.id, %{"start_time" => past})
+      shift_now = shift_fixture(employment.id, worker.id, %{"start_time" => base})
       shift_future = shift_fixture(employment.id, worker.id, %{"start_time" => future})
 
-      # Get shifts from yesterday onwards
-      yesterday = DateTime.add(now, -86400)
-      shifts = Shifts.list_shifts_for_worker(worker.id, start_date: yesterday)
+      # Get shifts from 1 day before base onwards
+      filter_start = DateTime.add(base, -86400)
+      shifts = Shifts.list_shifts_for_worker(worker.id, date_from: filter_start)
 
       shift_ids = Enum.map(shifts, & &1.id)
       assert shift_now.id in shift_ids
       assert shift_future.id in shift_ids
-      assert length(shifts) == 2
+      refute shift_past.id in shift_ids
     end
   end
 
@@ -254,13 +276,16 @@ defmodule Mosaic.ShiftsTest do
       worker = worker_fixture()
       employment = employment_fixture(worker.id)
 
-      now = DateTime.utc_now() |> DateTime.truncate(:second)
+      # Create shift within employment period
+      shift_start = DateTime.add(employment.start_time, 86400 * 7)
 
-      shift = shift_fixture(employment.id, worker.id, %{
-        "start_time" => now,
-        "end_time" => DateTime.add(now, 28800),  # 8 hours
-        "auto_generate_periods" => true
-      })
+      shift =
+        shift_fixture(employment.id, worker.id, %{
+          "start_time" => shift_start,
+          # 8 hours
+          "end_time" => DateTime.add(shift_start, 28800),
+          "auto_generate_periods" => true
+        })
 
       hours = Shifts.calculate_worked_hours(shift.id)
       # Should have work periods totaling less than 8 hours (due to breaks)
@@ -272,13 +297,15 @@ defmodule Mosaic.ShiftsTest do
       worker = worker_fixture()
       employment = employment_fixture(worker.id)
 
-      now = DateTime.utc_now() |> DateTime.truncate(:second)
+      # Create shift within employment period
+      shift_start = DateTime.add(employment.start_time, 86400 * 7)
 
-      shift = shift_fixture(employment.id, worker.id, %{
-        "start_time" => now,
-        "end_time" => DateTime.add(now, 28800),
-        "auto_generate_periods" => true
-      })
+      shift =
+        shift_fixture(employment.id, worker.id, %{
+          "start_time" => shift_start,
+          "end_time" => DateTime.add(shift_start, 28800),
+          "auto_generate_periods" => true
+        })
 
       break_hours = Shifts.calculate_break_hours(shift.id)
       # Should have at least one 30-minute break for 8-hour shift
@@ -289,13 +316,15 @@ defmodule Mosaic.ShiftsTest do
       worker = worker_fixture()
       employment = employment_fixture(worker.id)
 
-      now = DateTime.utc_now() |> DateTime.truncate(:second)
+      # Create shift within employment period
+      shift_start = DateTime.add(employment.start_time, 86400 * 7)
 
-      shift = shift_fixture(employment.id, worker.id, %{
-        "start_time" => now,
-        "end_time" => DateTime.add(now, 28800),
-        "auto_generate_periods" => true
-      })
+      shift =
+        shift_fixture(employment.id, worker.id, %{
+          "start_time" => shift_start,
+          "end_time" => DateTime.add(shift_start, 28800),
+          "auto_generate_periods" => true
+        })
 
       net_hours = Shifts.calculate_net_hours(shift.id)
       worked_hours = Shifts.calculate_worked_hours(shift.id)

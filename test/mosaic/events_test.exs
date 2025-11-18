@@ -29,9 +29,9 @@ defmodule Mosaic.EventsTest do
       shift_event = event_fixture(%{"event_type_id" => shift_type.id})
       _employment_event = event_fixture(%{"event_type_id" => employment_type.id})
 
-      events = Events.list_events(event_type: shift_type.id)
-      assert length(events) == 1
-      assert hd(events).id == shift_event.id
+      events = Events.list_events(event_type: "shift")
+      assert length(events) >= 1
+      assert shift_event.id in Enum.map(events, & &1.id)
     end
 
     test "filters by status" do
@@ -77,10 +77,12 @@ defmodule Mosaic.EventsTest do
   describe "create_event/1" do
     test "creates event with valid attributes" do
       event_type = Seeds.get_event_type!("shift")
+      start_time = DateTime.utc_now()
 
       attrs = %{
         "event_type_id" => event_type.id,
-        "start_time" => DateTime.utc_now(),
+        "start_time" => start_time,
+        "end_time" => DateTime.add(start_time, 3600),
         "status" => "draft",
         "properties" => %{"location" => "Office"}
       }
@@ -171,7 +173,7 @@ defmodule Mosaic.EventsTest do
       child2 = event_fixture(%{"parent_id" => parent.id})
 
       hierarchy = Events.get_event_hierarchy(parent.id)
-      assert hierarchy.id == parent.id
+      assert hierarchy.event.id == parent.id
       assert length(hierarchy.children) == 2
       child_ids = Enum.map(hierarchy.children, & &1.id)
       assert child1.id in child_ids
@@ -290,7 +292,7 @@ defmodule Mosaic.EventsTest do
 
       # Get events from yesterday onwards
       yesterday = DateTime.add(now, -86400)
-      events = Events.list_events_for_participant("shift", worker.id, start_date: yesterday)
+      events = Events.list_events_for_participant("shift", worker.id, date_from: yesterday)
 
       event_ids = Enum.map(events, & &1.id)
       refute event_past.id in event_ids

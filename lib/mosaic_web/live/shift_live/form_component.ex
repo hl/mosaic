@@ -1,6 +1,8 @@
 defmodule MosaicWeb.ShiftLive.FormComponent do
   use MosaicWeb, :live_component
 
+  import MosaicWeb.LiveHelpers
+
   alias Mosaic.Shifts
 
   @impl true
@@ -156,8 +158,8 @@ defmodule MosaicWeb.ShiftLive.FormComponent do
 
   defp form_to_event_attrs(params) do
     %{
-      "start_time" => parse_datetime(params["start_time"]),
-      "end_time" => parse_datetime(params["end_time"]),
+      "start_time" => parse_datetime_local(params["start_time"]),
+      "end_time" => parse_datetime_local(params["end_time"]),
       "status" => params["status"] || "draft",
       "auto_generate_periods" => params["auto_generate_periods"] == "true",
       "location" => params["location"],
@@ -168,42 +170,13 @@ defmodule MosaicWeb.ShiftLive.FormComponent do
 
   defp shift_to_form_attrs(shift) do
     %{
-      start_time: format_datetime(shift.start_time),
-      end_time: format_datetime(shift.end_time),
+      start_time: format_datetime_local(shift.start_time),
+      end_time: format_datetime_local(shift.end_time),
       status: shift.status,
       location: shift.properties["location"],
       department: shift.properties["department"],
       notes: shift.properties["notes"],
       auto_generate_periods: false
     }
-  end
-
-  defp parse_datetime(nil), do: nil
-  defp parse_datetime(""), do: nil
-
-  defp parse_datetime(datetime_string) when is_binary(datetime_string) do
-    # Browser sends datetime-local in format: "2025-11-19T14:47"
-    # Try parsing with and without seconds
-    case NaiveDateTime.from_iso8601(datetime_string <> ":00") do
-      {:ok, naive} ->
-        DateTime.from_naive!(naive, "Etc/UTC")
-
-      {:error, _} ->
-        case NaiveDateTime.from_iso8601(datetime_string) do
-          {:ok, naive} -> DateTime.from_naive!(naive, "Etc/UTC")
-          {:error, _} -> nil
-        end
-    end
-  end
-
-  defp parse_datetime(_), do: nil
-
-  defp format_datetime(nil), do: nil
-
-  defp format_datetime(%DateTime{} = dt) do
-    dt
-    |> DateTime.truncate(:second)
-    |> DateTime.to_naive()
-    |> NaiveDateTime.to_iso8601()
   end
 end
