@@ -9,3 +9,72 @@
 #
 # We recommend using the bang functions (`insert!`, `update!`
 # and so on) as they will fail if something goes wrong.
+
+alias Mosaic.Repo
+alias Mosaic.EventType
+
+# Seed Event Types
+event_types = [
+  %{
+    name: "employment",
+    category: "contract",
+    can_nest: false,
+    can_have_children: true,
+    requires_participation: true,
+    schema: %{},
+    rules: %{
+      "allowed_children" => ["shift"],
+      "max_duration_days" => nil
+    },
+    is_active: true
+  },
+  %{
+    name: "shift",
+    category: "work",
+    can_nest: true,
+    can_have_children: true,
+    requires_participation: true,
+    schema: %{},
+    rules: %{
+      "allowed_children" => ["work_period", "break"],
+      "allowed_parents" => ["employment"]
+    },
+    is_active: true
+  },
+  %{
+    name: "work_period",
+    category: "work",
+    can_nest: true,
+    can_have_children: false,
+    requires_participation: true,
+    schema: %{},
+    rules: %{
+      "allowed_parents" => ["shift"]
+    },
+    is_active: true
+  },
+  %{
+    name: "break",
+    category: "work",
+    can_nest: true,
+    can_have_children: false,
+    requires_participation: true,
+    schema: %{},
+    rules: %{
+      "allowed_parents" => ["shift"],
+      "is_paid" => false
+    },
+    is_active: true
+  }
+]
+
+Enum.each(event_types, fn event_type_attrs ->
+  Repo.insert!(
+    %EventType{}
+    |> EventType.changeset(event_type_attrs),
+    on_conflict: :nothing,
+    conflict_target: :name
+  )
+end)
+
+IO.puts("Seeded event types successfully!")
