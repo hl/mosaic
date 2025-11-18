@@ -55,19 +55,32 @@ Current event types in the system:
 - **Duration:** Minutes
 - **Special:** Has `is_paid` property
 
-## Behaviour Pattern
+## Protocol Pattern
 
-Event types implement custom logic through the `Mosaic.EventTypeBehaviour`:
+Event types implement custom logic through the `Mosaic.EventTypeBehaviour` protocol. This allows the system to dispatch to type-specific implementations without maintaining a registry of modules.
 
 ```elixir
-defmodule Mosaic.EventTypeBehaviour do
-  @callback changeset(event :: Ecto.Schema.t(), attrs :: map()) :: Ecto.Changeset.t()
+defprotocol Mosaic.EventTypeBehaviour do
+  @doc """
+  Returns a changeset for the event with event type-specific validations.
+  """
+  @spec changeset(t(), Ecto.Schema.t(), map()) :: Ecto.Changeset.t()
+  def changeset(event_type, event, attrs)
+end
 
-  def module_for_name("shift"), do: Mosaic.EventTypes.Shift
-  def module_for_name("employment"), do: Mosaic.EventTypes.Employment
-  def module_for_name("work_period"), do: nil
-  def module_for_name("break"), do: nil
-  def module_for_name(_), do: nil
+defimpl Mosaic.EventTypeBehaviour, for: Mosaic.EventType do
+  def changeset(%Mosaic.EventType{name: "shift"}, event, attrs) do
+    Mosaic.EventTypes.Shift.changeset(event, attrs)
+  end
+
+  def changeset(%Mosaic.EventType{name: "employment"}, event, attrs) do
+    Mosaic.EventTypes.Employment.changeset(event, attrs)
+  end
+
+  # Fallback for event types without custom implementations
+  def changeset(%Mosaic.EventType{}, event, attrs) do
+    Mosaic.Event.changeset(event, attrs)
+  end
 end
 ```
 
@@ -77,7 +90,9 @@ end
 
 ```elixir
 defmodule Mosaic.EventTypes.TimeOff do
-  @behaviour Mosaic.EventTypeBehaviour
+  @moduledoc """
+  Time off event type implementation.
+  """
 
   import Ecto.Changeset
   alias Mosaic.Event
@@ -113,10 +128,13 @@ defmodule Mosaic.EventTypes.TimeOff do
 end
 ```
 
-**Step 2: Register in behaviour module**
+**Step 2: Add protocol implementation**
 
 ```elixir
-def module_for_name("time_off"), do: Mosaic.EventTypes.TimeOff
+# In lib/mosaic/event_type_behaviour.ex, add to the defimpl block:
+def changeset(%Mosaic.EventType{name: "time_off"}, event, attrs) do
+  Mosaic.EventTypes.TimeOff.changeset(event, attrs)
+end
 ```
 
 **Step 3: Seed the database**
@@ -167,7 +185,7 @@ Handled by event type modules:
 
 ## Dispatch Mechanism
 
-The `Mosaic.Events` module dispatches to type-specific changesets:
+The `Mosaic.Events` module dispatches to type-specific changesets using the protocol:
 
 ```elixir
 defp get_changeset_for_event_type(%Event{} = event, attrs) do
@@ -176,21 +194,28 @@ defp get_changeset_for_event_type(%Event{} = event, attrs) do
     Map.get(attrs, "event_type_id") ||
     event.event_type_id
 
-  with event_type_id when not is_nil(event_type_id) <- event_type_id,
-       %EventType{name: name} <- Repo.get(EventType, event_type_id),
-       module when not is_nil(module) <-
-         Mosaic.EventTypeBehaviour.module_for_name(name) do
-    module.changeset(event, attrs)
-  else
-    _ -> Event.changeset(event, attrs)
+  case event_type_id do
+    nil ->
+      Event.changeset(event, attrs)
+
+    id ->
+      case Repo.get(EventType, id) do
+        %EventType{} = event_type ->
+          Mosaic.EventTypeBehaviour.changeset(event_type, event, attrs)
+
+        nil ->
+          Event.changeset(event, attrs)
+      end
   end
 end
 ```
 
-This ensures:
+This protocol-based approach ensures:
 - Type-specific logic is applied at create/update time
+- Pattern matching on `EventType.name` in protocol implementation
 - Generic events fall back to base validation
-- No hardcoded case statements that grow with each type
+- No manual registry maintenance - just add a new pattern match clause
+- Compile-time safety with protocol dispatch
 
 ## Context Modules
 
@@ -224,19 +249,26 @@ Context modules provide:
 
 ### Extensibility
 New event types are added without:
-- Schema migrations
-- Modifying core Events module
+- Schema migrations for core tables
+- Modifying core Events module dispatch logic
 - Breaking existing types
+- Maintaining a separate registry module
 
 ### Maintainability
-- Type logic is isolated in modules
-- Behaviour ensures consistent interface
-- Registry makes types discoverable
+- Type logic is isolated in dedicated modules
+- Protocol ensures consistent interface across all types
+- Pattern matching makes dispatch logic explicit
+- Adding new types requires only:
+  1. Creating the event type module
+  2. Adding one pattern match clause to the protocol implementation
+  3. Seeding the database
 
 ### Performance
 - Properties indexed with GIN for JSONB queries
-- Event type dispatch happens once per operation
+- Protocol dispatch is optimized by the BEAM VM
+- Event type lookup happens once per operation
 - No polymorphic query penalties
+- Pattern matching is resolved at compile time
 
 ## See Also
 

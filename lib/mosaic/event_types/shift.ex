@@ -3,8 +3,6 @@ defmodule Mosaic.EventTypes.Shift do
   Shift-specific business logic and validations.
   """
 
-  @behaviour Mosaic.EventTypeBehaviour
-
   import Ecto.Changeset
   alias Mosaic.Event
 

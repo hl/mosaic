@@ -3,8 +3,6 @@ defmodule Mosaic.EventTypes.Employment do
   Employment-specific business logic and validations.
   """
 
-  @behaviour Mosaic.EventTypeBehaviour
-
   import Ecto.Changeset
   alias Mosaic.Event
 

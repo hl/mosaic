@@ -89,12 +89,18 @@ defmodule Mosaic.Events do
     event_type_id =
       Map.get(attrs, :event_type_id) || Map.get(attrs, "event_type_id") || event.event_type_id
 
-    with event_type_id when not is_nil(event_type_id) <- event_type_id,
-         %EventType{name: name} <- Repo.get(EventType, event_type_id),
-         module when not is_nil(module) <- Mosaic.EventTypeBehaviour.module_for_name(name) do
-      module.changeset(event, attrs)
-    else
-      _ -> Event.changeset(event, attrs)
+    case event_type_id do
+      nil ->
+        Event.changeset(event, attrs)
+
+      id ->
+        case Repo.get(EventType, id) do
+          %EventType{} = event_type ->
+            Mosaic.EventTypeBehaviour.changeset(event_type, event, attrs)
+
+          nil ->
+            Event.changeset(event, attrs)
+        end
     end
   end
 
