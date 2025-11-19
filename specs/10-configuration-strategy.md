@@ -40,8 +40,5 @@
 ## Follow-up Items & Decisions
 1. **Rule/blueprint format — DECIDED:** Store definitions as JSON so they can be versioned, diffed, and easily transported through APIs/CLI tools.
 2. **Rule engine — DECIDED:** Use the existing RETE engine implementation as the runtime for executing JSON-defined rule graphs.
-3. **Tenant customization vs. shared updates — NEED PLAN:** Suggested options:
-   - Version every blueprint/config pack and ship migrations that tenants opt into (similar to database migrations).
-   - Introduce feature-flag layers so tenants can preview blueprint updates before promoting them to production sites.
-   - Maintain “delta” overlays per tenant that sit atop shared blueprints; when upstream changes arrive, merge via structured change sets rather than manual edits.
+3. **Tenant customization vs. shared updates — DECIDED:** Version every blueprint/config pack and ship migration bundles that tenants can preview via feature flags. Tenants maintain lightweight “delta” overlays that describe deviations from the shared pack; overlay merges run through structured change sets whenever an upstream version is applied. This keeps shared improvements flowing while preserving local tweaks.
 4. **Governance question clarified:** We need a lightweight review process ensuring new product work first asks “can this be expressed as a reusable primitive or blueprint update?” before implementing bespoke code. Examples include checklist items in design docs, architecture review gates, or lint-style tooling that flags direct schema changes when a configuration approach exists.
