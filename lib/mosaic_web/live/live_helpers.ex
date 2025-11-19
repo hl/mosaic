@@ -19,9 +19,15 @@ defmodule MosaicWeb.LiveHelpers do
   def parse_datetime_local(""), do: nil
 
   def parse_datetime_local(datetime_string) when is_binary(datetime_string) do
-    with {:error, _} <- parse_with_seconds(datetime_string <> ":00"),
-         {:error, _} <- parse_with_seconds(datetime_string) do
-      nil
+    case parse_with_seconds(datetime_string <> ":00") do
+      {:ok, datetime} ->
+        datetime
+
+      {:error, _} ->
+        case parse_with_seconds(datetime_string) do
+          {:ok, datetime} -> datetime
+          {:error, _} -> nil
+        end
     end
   end
 
