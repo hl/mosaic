@@ -65,6 +65,18 @@ event_types = [
       "is_paid" => false
     },
     is_active: true
+  },
+  %{
+    name: "location_membership",
+    category: "organizational",
+    can_nest: false,
+    can_have_children: false,
+    requires_participation: true,
+    schema: %{},
+    rules: %{
+      "participation_types" => ["parent_location", "child_location"]
+    },
+    is_active: true
   }
 ]
 

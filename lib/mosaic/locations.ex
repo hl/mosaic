@@ -10,6 +10,10 @@ defmodule Mosaic.Locations do
   alias Mosaic.Repo
   alias Mosaic.Entities.Entity
   alias Mosaic.Locations.Location
+  alias Mosaic.Events
+  alias Mosaic.Events.Event
+  alias Mosaic.Events.EventType
+  alias Mosaic.Participations.Participation
 
   @doc """
   Returns the list of all locations.
@@ -172,5 +176,236 @@ defmodule Mosaic.Locations do
       order_by: [asc: fragment("?->>'name'", e.properties)]
     )
     |> Repo.all()
+  end
+
+  # Location Hierarchy Functions
+
+  @doc """
+  Links a child location to a parent via a location_membership event.
+
+  Creates an active location_membership event with two participations:
+  - parent_location: The parent location
+  - child_location: The child location
+
+  ## Examples
+
+      iex> set_parent(child_id, parent_id)
+      {:ok, %Event{}}
+
+      iex> set_parent(child_id, parent_id, ~U[2024-01-01 00:00:00Z])
+      {:ok, %Event{}}
+
+  """
+  def set_parent(child_id, parent_id, start_time \\ nil) do
+    start_time = start_time || DateTime.utc_now()
+
+    Repo.transaction(fn ->
+      with {:ok, _child} <- validate_location_exists(child_id),
+           {:ok, _parent} <- validate_location_exists(parent_id),
+           :ok <- validate_no_circular_reference(child_id, parent_id),
+           {:ok, event_type} <- Events.get_event_type_by_name("location_membership"),
+           attrs <- %{
+             "event_type_id" => event_type.id,
+             "start_time" => start_time,
+             "status" => "active"
+           },
+           {:ok, event} <- Events.create_event(attrs),
+           # Create parent participation
+           parent_attrs <- %{
+             "participant_id" => parent_id,
+             "event_id" => event.id,
+             "participation_type" => "parent_location"
+           },
+           {:ok, _parent_participation} <-
+             %Participation{}
+             |> Participation.changeset(parent_attrs)
+             |> Repo.insert(),
+           # Create child participation
+           child_attrs <- %{
+             "participant_id" => child_id,
+             "event_id" => event.id,
+             "participation_type" => "child_location"
+           },
+           {:ok, _child_participation} <-
+             %Participation{}
+             |> Participation.changeset(child_attrs)
+             |> Repo.insert() do
+        event
+      else
+        {:error, reason} -> Repo.rollback(reason)
+      end
+    end)
+  end
+
+  @doc """
+  Gets the current parent for a location at a given time.
+
+  Returns the ID of the parent location if one exists, or nil if the location
+  has no parent at the specified time.
+
+  ## Examples
+
+      iex> get_parent(location_id)
+      "parent-location-id"
+
+      iex> get_parent(location_id, ~U[2024-01-01 00:00:00Z])
+      "parent-location-id"
+
+      iex> get_parent(orphan_location_id)
+      nil
+
+  """
+  def get_parent(location_id, at_time \\ nil) do
+    at_time = at_time || DateTime.utc_now()
+
+    query =
+      from e in Event,
+        join: et in EventType,
+        on: e.event_type_id == et.id,
+        join: p_child in Participation,
+        on: p_child.event_id == e.id,
+        join: p_parent in Participation,
+        on: p_parent.event_id == e.id,
+        where: et.name == "location_membership",
+        where: p_child.participant_id == ^location_id,
+        where: p_child.participation_type == "child_location",
+        where: p_parent.participation_type == "parent_location",
+        where: e.start_time <= ^at_time,
+        where: is_nil(e.end_time) or e.end_time > ^at_time,
+        where: e.status != "cancelled",
+        select: p_parent.participant_id
+
+    Repo.one(query)
+  end
+
+  @doc """
+  Gets all children of a location at a given time.
+
+  Returns a list of child location IDs.
+
+  ## Examples
+
+      iex> get_children(location_id)
+      ["child-1-id", "child-2-id"]
+
+      iex> get_children(location_id, ~U[2024-01-01 00:00:00Z])
+      ["child-1-id"]
+
+      iex> get_children(leaf_location_id)
+      []
+
+  """
+  def get_children(location_id, at_time \\ nil) do
+    at_time = at_time || DateTime.utc_now()
+
+    query =
+      from e in Event,
+        join: et in EventType,
+        on: e.event_type_id == et.id,
+        join: p_parent in Participation,
+        on: p_parent.event_id == e.id,
+        join: p_child in Participation,
+        on: p_child.event_id == e.id,
+        where: et.name == "location_membership",
+        where: p_parent.participant_id == ^location_id,
+        where: p_parent.participation_type == "parent_location",
+        where: p_child.participation_type == "child_location",
+        where: e.start_time <= ^at_time,
+        where: is_nil(e.end_time) or e.end_time > ^at_time,
+        where: e.status != "cancelled",
+        select: p_child.participant_id
+
+    Repo.all(query)
+  end
+
+  @doc """
+  Removes the parent relationship for a location by ending the active location_membership event.
+
+  ## Examples
+
+      iex> remove_parent(location_id)
+      {:ok, %Event{}}
+
+      iex> remove_parent(location_without_parent_id)
+      {:error, "No active parent relationship found"}
+
+  """
+  def remove_parent(location_id) do
+    # Use second-level precision to match :utc_datetime schema field
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    # Find the active parent relationship
+    query =
+      from e in Event,
+        join: et in EventType,
+        on: e.event_type_id == et.id,
+        join: p_child in Participation,
+        on: p_child.event_id == e.id,
+        where: et.name == "location_membership",
+        where: p_child.participant_id == ^location_id,
+        where: p_child.participation_type == "child_location",
+        where: e.start_time <= ^now,
+        where: is_nil(e.end_time) or e.end_time > ^now,
+        where: e.status == "active",
+        select: e
+
+    case Repo.one(query) do
+      nil ->
+        {:error, "No active parent relationship found"}
+
+      event ->
+        # Reload to ensure we have all fields
+        event = Repo.get!(Event, event.id)
+
+        # Ensure end_time is strictly after start_time (with second-level precision)
+        # Use now if it's after start_time, otherwise use start_time + 1 second
+        end_time =
+          case DateTime.compare(now, event.start_time) do
+            :gt -> now
+            _ -> DateTime.add(event.start_time, 1, :second)
+          end
+
+        # Set status to cancelled to immediately exclude from active queries
+        Events.update_event(event, %{"end_time" => end_time, "status" => "cancelled"})
+    end
+  end
+
+  # Private helper functions
+
+  defp validate_location_exists(location_id) do
+    case Repo.get(Entity, location_id) do
+      nil ->
+        {:error, "Location not found: #{location_id}"}
+
+      entity ->
+        if entity.entity_type == "location" do
+          {:ok, entity}
+        else
+          {:error, "Entity is not a location: #{location_id}"}
+        end
+    end
+  end
+
+  defp validate_no_circular_reference(child_id, parent_id) do
+    # Check if parent_id is a descendant of child_id (which would create a cycle)
+    if is_descendant?(parent_id, child_id) do
+      {:error, "Cannot create circular reference: parent is a descendant of child"}
+    else
+      :ok
+    end
+  end
+
+  defp is_descendant?(potential_descendant_id, ancestor_id) do
+    # Recursively check if potential_descendant is a child of ancestor
+    case get_parent(potential_descendant_id) do
+      nil ->
+        false
+
+      ^ancestor_id ->
+        true
+
+      parent_id ->
+        is_descendant?(parent_id, ancestor_id)
+    end
   end
 end
