@@ -11,6 +11,7 @@ defmodule Mosaic.Shifts do
   alias Mosaic.Participations.Participation
   alias Mosaic.Shifts.Shift
   alias Mosaic.Employments.Employment
+  alias Mosaic.Schedules.Schedule
 
   @doc """
   Creates a shift under an employment period.
@@ -53,6 +54,42 @@ defmodule Mosaic.Shifts do
       else
         {:error, reason} -> Repo.rollback(reason)
         :error -> Repo.rollback("Failed to create shift")
+      end
+    end)
+  end
+
+  @doc """
+  Creates a shift within a schedule (alternative to employment-based shifts).
+  Returns {:ok, {shift, participation}} or {:error, changeset}.
+
+  Attrs should include:
+  - start_time (required)
+  - end_time (required)
+  - status (optional, defaults to "draft")
+  - properties (optional, can include location, department, notes, etc.)
+  """
+  def create_shift_in_schedule(schedule_id, worker_id, attrs \\ %{}) do
+    Repo.transaction(fn ->
+      with {:ok, schedule} <- validate_schedule_for_shift(schedule_id),
+           :ok <- validate_shift_in_schedule(attrs, schedule),
+           :ok <- validate_no_shift_overlap(worker_id, attrs),
+           {:ok, event_type} <- Events.get_event_type_by_name(Shift.event_type()),
+           attrs <-
+             Map.merge(attrs, %{"event_type_id" => event_type.id, "parent_id" => schedule_id}),
+           {:ok, shift} <- Events.create_event(attrs),
+           participation_attrs <- %{
+             "participant_id" => worker_id,
+             "event_id" => shift.id,
+             "participation_type" => "worker",
+             "properties" => %{}
+           },
+           {:ok, participation} <-
+             %Participation{}
+             |> Participation.changeset(participation_attrs)
+             |> Repo.insert() do
+        {shift, participation}
+      else
+        {:error, reason} -> Repo.rollback(reason)
       end
     end)
   end
@@ -108,6 +145,19 @@ defmodule Mosaic.Shifts do
     from(e in Event,
       join: et in assoc(e, :event_type),
       where: et.name == ^Shift.event_type() and e.parent_id == ^employment_id,
+      order_by: [asc: e.start_time],
+      preload: [:event_type, :children, participations: :participant]
+    )
+    |> Repo.all()
+  end
+
+  @doc """
+  Lists all shifts under a schedule.
+  """
+  def list_shifts_for_schedule(schedule_id) do
+    from(e in Event,
+      join: et in assoc(e, :event_type),
+      where: et.name == ^Shift.event_type() and e.parent_id == ^schedule_id,
       order_by: [asc: e.start_time],
       preload: [:event_type, :children, participations: :participant]
     )
@@ -362,6 +412,33 @@ defmodule Mosaic.Shifts do
     Events.validate_event_type(shift_id, Shift.event_type(),
       preload: [:event_type, :participations]
     )
+  end
+
+  defp validate_schedule_for_shift(schedule_id) do
+    Events.validate_event_type(schedule_id, Schedule.event_type())
+  end
+
+  defp validate_shift_in_schedule(shift_attrs, schedule) do
+    shift_start = shift_attrs[:start_time] || shift_attrs["start_time"]
+    shift_end = shift_attrs[:end_time] || shift_attrs["end_time"]
+
+    cond do
+      is_nil(shift_start) ->
+        {:error, "Shift start time is required"}
+
+      is_nil(shift_end) ->
+        {:error, "Shift end time is required"}
+
+      DateTime.compare(shift_start, schedule.start_time) == :lt ->
+        {:error, "Shift starts before schedule period"}
+
+      not is_nil(schedule.end_time) and
+          DateTime.compare(shift_end, schedule.end_time) == :gt ->
+        {:error, "Shift ends after schedule period"}
+
+      true ->
+        :ok
+    end
   end
 
   defp get_worker_id(shift) do

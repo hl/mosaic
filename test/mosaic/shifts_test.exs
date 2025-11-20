@@ -334,4 +334,239 @@ defmodule Mosaic.ShiftsTest do
       assert net_hours > 0
     end
   end
+
+  describe "create_shift_in_schedule/3" do
+    test "creates shift with valid attributes" do
+      location = location_fixture()
+
+      schedule =
+        schedule_fixture(location.id, %{
+          "start_time" => ~U[2024-01-01 00:00:00Z],
+          "end_time" => ~U[2024-01-31 23:59:59Z]
+        })
+
+      worker = worker_fixture()
+
+      attrs = %{
+        "start_time" => ~U[2024-01-15 09:00:00Z],
+        "end_time" => ~U[2024-01-15 17:00:00Z],
+        "properties" => %{
+          "location" => "Warehouse 1",
+          "department" => "Receiving"
+        }
+      }
+
+      assert {:ok, {shift, participation}} =
+               Shifts.create_shift_in_schedule(schedule.id, worker.id, attrs)
+
+      assert shift.start_time == ~U[2024-01-15 09:00:00Z]
+      assert shift.end_time == ~U[2024-01-15 17:00:00Z]
+      assert shift.parent_id == schedule.id
+      assert shift.properties["location"] == "Warehouse 1"
+      assert participation.participant_id == worker.id
+      assert participation.participation_type == "worker"
+    end
+
+    test "validates shift is within schedule period" do
+      location = location_fixture()
+
+      schedule =
+        schedule_fixture(location.id, %{
+          "start_time" => ~U[2024-01-01 00:00:00Z],
+          "end_time" => ~U[2024-01-31 23:59:59Z]
+        })
+
+      worker = worker_fixture()
+
+      # Shift starts before schedule
+      attrs = %{
+        "start_time" => ~U[2023-12-31 09:00:00Z],
+        "end_time" => ~U[2024-01-15 17:00:00Z]
+      }
+
+      assert {:error, reason} = Shifts.create_shift_in_schedule(schedule.id, worker.id, attrs)
+      assert reason =~ "Shift starts before schedule period"
+    end
+
+    test "validates shift does not end after schedule" do
+      location = location_fixture()
+
+      schedule =
+        schedule_fixture(location.id, %{
+          "start_time" => ~U[2024-01-01 00:00:00Z],
+          "end_time" => ~U[2024-01-31 23:59:59Z]
+        })
+
+      worker = worker_fixture()
+
+      # Shift ends after schedule
+      attrs = %{
+        "start_time" => ~U[2024-01-30 09:00:00Z],
+        "end_time" => ~U[2024-02-01 17:00:00Z]
+      }
+
+      assert {:error, reason} = Shifts.create_shift_in_schedule(schedule.id, worker.id, attrs)
+      assert reason =~ "Shift ends after schedule period"
+    end
+
+    test "prevents overlapping shifts for same worker" do
+      location = location_fixture()
+      schedule = schedule_fixture(location.id)
+      worker = worker_fixture()
+
+      attrs1 = %{
+        "start_time" => DateTime.add(schedule.start_time, 3600),
+        "end_time" => DateTime.add(schedule.start_time, 10800)
+      }
+
+      {:ok, _} = Shifts.create_shift_in_schedule(schedule.id, worker.id, attrs1)
+
+      # Overlapping shift
+      attrs2 = %{
+        "start_time" => DateTime.add(schedule.start_time, 7200),
+        "end_time" => DateTime.add(schedule.start_time, 14400)
+      }
+
+      assert {:error, reason} = Shifts.create_shift_in_schedule(schedule.id, worker.id, attrs2)
+      assert reason =~ "overlap"
+    end
+
+    test "allows shifts for different workers at same time" do
+      location = location_fixture()
+      schedule = schedule_fixture(location.id)
+      worker1 = worker_fixture()
+      worker2 = worker_fixture()
+
+      attrs = %{
+        "start_time" => DateTime.add(schedule.start_time, 3600),
+        "end_time" => DateTime.add(schedule.start_time, 10800)
+      }
+
+      assert {:ok, _} = Shifts.create_shift_in_schedule(schedule.id, worker1.id, attrs)
+      assert {:ok, _} = Shifts.create_shift_in_schedule(schedule.id, worker2.id, attrs)
+    end
+
+    test "validates schedule exists and is correct type" do
+      worker = worker_fixture()
+      fake_schedule_id = Ecto.UUID.generate()
+
+      attrs = %{
+        "start_time" => ~U[2024-01-15 09:00:00Z],
+        "end_time" => ~U[2024-01-15 17:00:00Z]
+      }
+
+      assert {:error, _reason} =
+               Shifts.create_shift_in_schedule(fake_schedule_id, worker.id, attrs)
+    end
+
+    test "requires start_time and end_time" do
+      location = location_fixture()
+      schedule = schedule_fixture(location.id)
+      worker = worker_fixture()
+
+      # Missing end_time
+      attrs = %{
+        "start_time" => ~U[2024-01-15 09:00:00Z]
+      }
+
+      assert {:error, reason} = Shifts.create_shift_in_schedule(schedule.id, worker.id, attrs)
+      assert reason =~ "end time is required"
+    end
+  end
+
+  describe "list_shifts_for_schedule/1" do
+    test "returns shifts for specific schedule" do
+      location = location_fixture()
+      schedule = schedule_fixture(location.id)
+      worker = worker_fixture()
+
+      attrs1 = %{
+        "start_time" => DateTime.add(schedule.start_time, 3600),
+        "end_time" => DateTime.add(schedule.start_time, 10800)
+      }
+
+      attrs2 = %{
+        "start_time" => DateTime.add(schedule.start_time, 86400),
+        "end_time" => DateTime.add(schedule.start_time, 90000)
+      }
+
+      {:ok, {shift1, _}} = Shifts.create_shift_in_schedule(schedule.id, worker.id, attrs1)
+      {:ok, {shift2, _}} = Shifts.create_shift_in_schedule(schedule.id, worker.id, attrs2)
+
+      shifts = Shifts.list_shifts_for_schedule(schedule.id)
+      shift_ids = Enum.map(shifts, & &1.id)
+
+      assert length(shifts) == 2
+      assert shift1.id in shift_ids
+      assert shift2.id in shift_ids
+    end
+
+    test "returns shifts ordered by start_time" do
+      location = location_fixture()
+      schedule = schedule_fixture(location.id)
+      worker = worker_fixture()
+
+      # Create in reverse chronological order
+      attrs2 = %{
+        "start_time" => DateTime.add(schedule.start_time, 86400),
+        "end_time" => DateTime.add(schedule.start_time, 90000)
+      }
+
+      attrs1 = %{
+        "start_time" => DateTime.add(schedule.start_time, 3600),
+        "end_time" => DateTime.add(schedule.start_time, 10800)
+      }
+
+      {:ok, {_shift2, _}} = Shifts.create_shift_in_schedule(schedule.id, worker.id, attrs2)
+      {:ok, {shift1, _}} = Shifts.create_shift_in_schedule(schedule.id, worker.id, attrs1)
+
+      shifts = Shifts.list_shifts_for_schedule(schedule.id)
+
+      # Should be ordered by start_time ascending
+      assert List.first(shifts).id == shift1.id
+    end
+
+    test "returns empty list for schedule without shifts" do
+      location = location_fixture()
+      schedule = schedule_fixture(location.id)
+
+      assert Shifts.list_shifts_for_schedule(schedule.id) == []
+    end
+
+    test "does not return shifts from other schedules" do
+      location = location_fixture()
+
+      schedule1 =
+        schedule_fixture(location.id, %{
+          "start_time" => ~U[2024-01-01 00:00:00Z],
+          "end_time" => ~U[2024-01-31 23:59:59Z]
+        })
+
+      schedule2 =
+        schedule_fixture(location.id, %{
+          "start_time" => ~U[2024-02-01 00:00:00Z],
+          "end_time" => ~U[2024-02-28 23:59:59Z]
+        })
+
+      worker = worker_fixture()
+
+      attrs1 = %{
+        "start_time" => ~U[2024-01-15 09:00:00Z],
+        "end_time" => ~U[2024-01-15 17:00:00Z]
+      }
+
+      attrs2 = %{
+        "start_time" => ~U[2024-02-15 09:00:00Z],
+        "end_time" => ~U[2024-02-15 17:00:00Z]
+      }
+
+      {:ok, {shift1, _}} = Shifts.create_shift_in_schedule(schedule1.id, worker.id, attrs1)
+      {:ok, {_shift2, _}} = Shifts.create_shift_in_schedule(schedule2.id, worker.id, attrs2)
+
+      shifts = Shifts.list_shifts_for_schedule(schedule1.id)
+
+      assert length(shifts) == 1
+      assert List.first(shifts).id == shift1.id
+    end
+  end
 end
