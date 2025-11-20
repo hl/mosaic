@@ -77,6 +77,19 @@ event_types = [
       "participation_types" => ["parent_location", "child_location"]
     },
     is_active: true
+  },
+  %{
+    name: "schedule",
+    category: "planning",
+    can_nest: false,
+    can_have_children: true,
+    requires_participation: true,
+    schema: %{},
+    rules: %{
+      "allowed_children" => ["shift"],
+      "allowed_statuses" => ["draft", "active", "archived"]
+    },
+    is_active: true
   }
 ]
 

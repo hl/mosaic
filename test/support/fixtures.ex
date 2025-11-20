@@ -10,7 +10,7 @@ defmodule Mosaic.Fixtures do
   alias Mosaic.Entities.Entity
   alias Mosaic.Events.Event
   alias Mosaic.Participations.Participation
-  alias Mosaic.{Workers, Locations, Employments, Shifts}
+  alias Mosaic.{Workers, Locations, Employments, Shifts, Schedules}
   alias Mosaic.Test.Seeds
 
   @doc """
@@ -232,6 +232,26 @@ defmodule Mosaic.Fixtures do
     %Entity{}
     |> Entity.changeset(attrs)
     |> Repo.insert!()
+  end
+
+  @doc """
+  Creates a schedule for a location with default or custom attributes.
+  """
+  def schedule_fixture(location_id, attrs \\ %{}) do
+    default_attrs = %{
+      "start_time" => DateTime.utc_now(),
+      "end_time" => DateTime.add(DateTime.utc_now(), 30, :day),
+      "status" => "draft",
+      "properties" => %{
+        "timezone" => "UTC",
+        "version" => 1
+      }
+    }
+
+    attrs = deep_merge(default_attrs, attrs)
+
+    {:ok, {schedule, _participation}} = Schedules.create_schedule(location_id, attrs)
+    schedule
   end
 
   @doc """
