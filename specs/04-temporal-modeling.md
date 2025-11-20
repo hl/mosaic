@@ -1,5 +1,7 @@
 # Temporal Modeling
 
+> **Navigation:** [📚 Index](index.md) | [🎯 Start Here](00-start-here.md) | [🔴 Architecture](architecture.md)
+
 ## Overview
 
 Temporal modeling is central to Mosaic's design. All events have time boundaries, and the system enforces various temporal constraints to ensure data integrity.
@@ -267,5 +269,5 @@ Track when temporal fields change:
 ## See Also
 
 - [01-events-and-participations.md](01-events-and-participations.md) - Core event model
-- [11-overlap-prevention.md](11-overlap-prevention.md) - Detailed overlap validation
-- [06-shifts.md](06-shifts.md) - Shift-specific temporal logic
+- [09-scheduling-model.md](09-scheduling-model.md) - Shift implementation with temporal validation
+- [03-event-types.md](03-event-types.md) - Event type system and validation patterns

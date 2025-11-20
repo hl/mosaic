@@ -1,44 +1,468 @@
-# Configuration Strategy & Composability
+# Configuration Implementation Strategy
+
+> **Navigation:** [📚 Index](index.md) | [🎯 Start Here](00-start-here.md) | [🔴 Architecture](architecture.md)
 
 ## Purpose
-- Capture how Mosaic can turn domain variability (labor laws, workflows, integrations) into configuration rather than one-off code.
-- Answer four guiding questions around templating, global rollout, composable primitives, and reusable patterns, plus document follow-up items.
-- Anchor the discussion with practical examples (e.g., `calculate_net_hours/1`) that must migrate from bespoke functions to configurable constructs.
+Practical guide for implementing configurable, multi-tenant features in Mosaic without writing one-off code for each customer or jurisdiction.
 
-## Question 1 — Fast configuration & templating
-> 1 How can we make creating configurations incredibly fast and easy, e.g. templating etc
+## Current State Assessment
 
-- **Blueprint catalog:** Maintain predefined “blueprints” for common scenarios (retail store, warehouse inbound, nurse scheduling). A blueprint is just a bundle of event types, property defaults, participation roles, and rule scripts serialized as JSON/YAML. Provisioning a new tenant becomes “apply blueprint + tweak overrides.”
-- **Composable property schemas:** Expose reusable fragments (e.g., `money`, `duration`, `geo_address`) that can be embedded in event/property definitions via `$ref`-style references. Eliminates repeated schema boilerplate when crafting new configuration forms.
-- **Rules-as-data:** Instead of scattering logic like `calculate_net_hours/1`, store rule graphs in the properties JSON (or a dedicated `rules` table) referencing primitives such as `worked_hours`, `break_duration`, `overtime_multipliers`. Evaluate via a rule engine (see Question 3) so changing net-hours behavior is a configuration change.
-- **Admin UX accelerators:** Provide UI wizards that stamp out hierarchy, event types, and participation templates in one flow. Tie them to the blueprint catalog so “Create UK Distribution Center” pre-fills employment policies, default shift structures, and pay rules.
+**What we have:**
+- Event/participation spine (flexible data model)
+- JSONB properties for type-specific data
+- Event types system with schemas
+- Contexts: Events, Participations, Entities, Shifts, Employments
+- Protocol-based dispatch system (see `event_type_behaviour.ex`)
 
-## Question 2 — Multi-country & sector expansion through configuration
-> 2 How can we make it trivial to go into lots more countries and sectors purely through configuration
+**What this guide addresses:**
+- Configuration-driven features vs hardcoded logic
+- Blueprint system for fast tenant provisioning
+- Multi-country support through configuration
+- Reusable rule primitives
 
-- **Localization layers:** Separate legal calendars, pay frequencies, currency/rounding rules, and statutory leave requirements into country-specific configuration packs (e.g., `config/countries/uk.json`). Attach them to organizations via participations so switching a site’s locale is declarative.
-- **Regulation modules:** Model compliance artifacts (accrual caps, rest-period minimums, premium triggers) as event-type behaviors referenced by the rule engine. Provide templates for each jurisdiction so extending into, say, Spain is “install `es_default` pack” rather than writing new code paths.
-- **Sector adapters:** For vertical-specific needs (healthcare credentialing, logistics route planning), ship optional bundles of event types + validations. Bundles register themselves in the event-type registry and can be toggled per tenant.
-- **Data-driven UI:** Drive LiveView forms from the property schemas defined in configuration so once a new country adds a “Sunday premium” field, the UI renders it without code deployments.
+---
 
-## Question 3 — Assembling primitives into new products (ATS, LMS, etc.)
-> 3 How can we make it possible to assemble the primitives we create into "other things", e.g. ATS, LMS
+## Key Pattern: Event Type Lookup
 
-- **Unified primitives:** Ensure events/participations/entities remain generic enough that “candidate application” or “course enrollment” are just new event types, not new tables. Their workflows (status pipelines, notifications) hook into the same rule engine.
-- **Graph-based rule engine:** Introduce a configuration-driven engine where nodes represent primitive operations (create event, assign participant, evaluate temporal overlap, compute `calculate_net_hours`). Edges represent orchestration. By wiring primitives differently, we can express ATS pipelines, LMS progress, or workforce scheduling without new Elixir modules.
-- **Composable task library:** Publish reusable functions (e.g., `sum_child_durations`, `apply_rate`, `enforce_overlap_rule`) as versioned building blocks referenced by name in configuration. The earlier `calculate_net_hours/1` example becomes `net_hours = sum("work_period") - sum_unpaid("break")`, both resolved by configurable tasks.
-- **Interface contracts:** Define standard schemas for surfaces like “form step,” “approval,” “document upload,” so primitives plug into ATS or LMS UI flows with minimal glue.
+Throughout all configuration examples, event creation follows this pattern:
 
-## Question 4 — Reusable patterns (time bounds, audit trails, accruals, etc.)
-> 4 Where have we got patterns that we end up re-inventing over and over again throughout Sona (e.g. things being time bound, audit trails, accruals, layering of time concepts etc)
+```elixir
+# ALWAYS use this pattern
+with {:ok, event_type} <- Events.get_event_type_by_name("shift"),
+     attrs <- Map.put(attrs, "event_type_id", event_type.id),
+     {:ok, event} <- Events.create_event(attrs) do
+  # success
+end
+```
 
-- **Temporal macros:** Canonicalize patterns such as valid-time + transaction-time, overlap detection, and layered time concepts into helper modules or rule-engine components. Every feature references the same primitives instead of re-implementing `validate_no_overlap`.
-- **Audit trail standard:** Enforce that every configurable action emits event + participation records plus an `activity_log` entry (who, what, when). Provide a single UI component for rendering audit chains so new modules inherit it automatically.
-- **Accrual engines:** Package accrual calculation as a declarative spec (`source_events`, `rate`, `cap`, `carryover_rules`). Any module needing balances (leave, training credits, budget hours) reuses the same processor.
-- **Layered configuration inheritance:** Define a hierarchical configuration resolution (global → country → organization → location → team). This prevents re-inventing override logic and makes the system’s behavior predictable no matter how many layers are involved.
+**Never** pass event types as strings directly to `create_event/1`.
 
-## Follow-up Items & Decisions
-1. **Rule/blueprint format — DECIDED:** Store definitions as JSON so they can be versioned, diffed, and easily transported through APIs/CLI tools.
-2. **Rule engine — DECIDED:** Use the existing RETE engine implementation as the runtime for executing JSON-defined rule graphs.
-3. **Tenant customization vs. shared updates — DECIDED:** Version every blueprint/config pack and ship migration bundles that tenants can preview via feature flags. Tenants maintain lightweight “delta” overlays that describe deviations from the shared pack; overlay merges run through structured change sets whenever an upstream version is applied. This keeps shared improvements flowing while preserving local tweaks.
-4. **Governance question clarified:** We need a lightweight review process ensuring new product work first asks “can this be expressed as a reusable primitive or blueprint update?” before implementing bespoke code. Examples include checklist items in design docs, architecture review gates, or lint-style tooling that flags direct schema changes when a configuration approach exists.
+---
+
+## Implementation 1: Blueprint System
+
+### Problem
+Creating a new tenant requires setting up dozens of event types, property schemas, participation roles and business rules. Currently this means manual database seeding or one-off migrations.
+
+### Solution: Configuration Bundles
+
+**Module**: `lib/mosaic/configuration/blueprints.ex`
+
+```elixir
+defmodule Mosaic.Configuration.Blueprints do
+  @moduledoc """
+  Manages configuration bundles for fast tenant provisioning.
+  """
+  
+  alias Mosaic.Repo
+  alias Mosaic.Events
+  alias Mosaic.Events.EventType
+  
+  @doc """
+  Loads a blueprint from JSON and applies it to a tenant.
+  """
+  def apply_blueprint(tenant_id, blueprint_name) do
+    blueprint = load_blueprint(blueprint_name)
+    
+    Repo.transaction(fn ->
+      # 1. Create event types
+      Enum.each(blueprint.event_types, fn et_config ->
+        create_event_type_for_tenant(tenant_id, et_config)
+      end)
+      
+      # 2. Set up participation types (stored as documentation/config)
+      Enum.each(blueprint.participation_types, fn pt_config ->
+        store_participation_type_config(tenant_id, pt_config)
+      end)
+      
+      # 3. Install rules (if using rules engine)
+      Enum.each(blueprint.rules || [], fn rule_config ->
+        create_rule(tenant_id, rule_config)
+      end)
+      
+      # 4. Create default entities (if any)
+      Enum.each(blueprint.default_entities || [], fn entity_config ->
+        create_entity(tenant_id, entity_config)
+      end)
+    end)
+  end
+  
+  defp load_blueprint(name) do
+    path = Path.join(:code.priv_dir(:mosaic), "blueprints/#{name}.json")
+    File.read!(path) |> Jason.decode!(keys: :atoms)
+  end
+  
+  defp create_event_type_for_tenant(tenant_id, config) do
+    # NOTE: This is system-level setup code - directly creates EventType records
+    # This is an exception to the "always use domain contexts" rule because
+    # this is infrastructure/configuration code, not application logic
+
+    %EventType{}
+    |> EventType.changeset(%{
+      name: config.name,
+      category: config.category,
+      can_nest: config[:can_nest] || false,
+      can_have_children: config[:can_have_children] || false,
+      requires_participation: config[:requires_participation] || true,
+      schema: config[:schema] || %{},
+      rules: config[:rules] || %{}
+    })
+    |> Repo.insert()
+  end
+  
+  defp store_participation_type_config(tenant_id, config) do
+    # Store configuration about expected participation types
+    # This could be in a configuration table or in tenant properties
+    :ok
+  end
+  
+  defp create_rule(tenant_id, rule_config) do
+    # If using a rules engine, create rule records
+    :ok
+  end
+  
+  defp create_entity(tenant_id, entity_config) do
+    # Create default entities like default locations, departments, etc.
+    :ok
+  end
+end
+```
+
+**Blueprint Example**: `priv/blueprints/uk_distribution_centre.json`
+
+```json
+{
+  "name": "uk_distribution_centre",
+  "version": "1.0.0",
+  "description": "UK distribution centre with shift scheduling and payroll",
+  
+  "event_types": [
+    {
+      "name": "shift",
+      "category": "work",
+      "can_nest": true,
+      "can_have_children": true,
+      "schema": {
+        "properties": ["location", "department", "notes", "break_minutes"]
+      }
+    },
+    {
+      "name": "break",
+      "category": "work",
+      "schema": {
+        "properties": ["is_paid", "break_type"]
+      }
+    }
+  ],
+  
+  "participation_types": [
+    {
+      "name": "worker",
+      "description": "Worker performing shift",
+      "applies_to_events": ["shift", "work_period", "break"]
+    },
+    {
+      "name": "supervisor",
+      "description": "Shift supervisor",
+      "applies_to_events": ["shift"]
+    }
+  ],
+  
+  "default_entities": [
+    {
+      "entity_type": "location",
+      "properties": {
+        "name": "Main Warehouse",
+        "address": "Default location"
+      }
+    }
+  ]
+}
+```
+
+**Usage:**
+
+```elixir
+# During tenant onboarding
+Mosaic.Configuration.Blueprints.apply_blueprint(tenant_id, "uk_distribution_centre")
+```
+
+---
+
+## Implementation 2: Jurisdiction-Specific Config
+
+### Problem
+Business rules vary by country (UK vs US minimum wage, break rules, holiday entitlements). Hardcoding these in application logic requires code changes for each jurisdiction.
+
+### Solution: Jurisdiction Configuration Files
+
+**Module**: `lib/mosaic/configuration/jurisdictions.ex`
+
+```elixir
+defmodule Mosaic.Configuration.Jurisdictions do
+  @moduledoc """
+  Loads and manages jurisdiction-specific configuration.
+  """
+  
+  def get_jurisdiction_config(country_code) do
+    path = Path.join(:code.priv_dir(:mosaic), "config/countries/#{country_code}.json")
+    
+    case File.read(path) do
+      {:ok, content} -> Jason.decode!(content, keys: :atoms)
+      {:error, _} -> get_default_config()
+    end
+  end
+  
+  def get_pay_rules(org_unit_id) do
+    org_unit = Mosaic.Entities.get_entity!(org_unit_id)
+    jurisdiction = org_unit.properties["jurisdiction_config"]["country_code"]
+    
+    config = get_jurisdiction_config(jurisdiction)
+    config.pay_rules
+  end
+  
+  def get_work_time_rules(org_unit_id) do
+    org_unit = Mosaic.Entities.get_entity!(org_unit_id)
+    jurisdiction = org_unit.properties["jurisdiction_config"]["country_code"]
+    
+    config = get_jurisdiction_config(jurisdiction)
+    config.work_time_rules
+  end
+  
+  defp get_default_config do
+    %{
+      country_code: "DEFAULT",
+      pay_rules: %{},
+      work_time_rules: %{}
+    }
+  end
+end
+```
+
+**Example**: `priv/config/countries/GB.json`
+
+```json
+{
+  "country_code": "GB",
+  "country_name": "United Kingdom",
+  "currency": "GBP",
+  "timezone_default": "Europe/London",
+  
+  "pay_rules": {
+    "minimum_wage": {
+      "23_and_over": 11.44,
+      "21_22": 11.44,
+      "18_20": 8.60,
+      "under_18": 6.40,
+      "apprentice": 6.40,
+      "effective_from": "2024-04-01"
+    }
+  },
+  
+  "work_time_rules": {
+    "max_hours_per_week": 48,
+    "averaging_period_weeks": 17,
+    "minimum_daily_rest_hours": 11,
+    "minimum_weekly_rest_hours": 24
+  },
+  
+  "leave_rules": {
+    "statutory_annual_leave_days": 28,
+    "accrual_method": "monthly"
+  }
+}
+```
+
+---
+
+## Implementation 3: Event Creation Helpers
+
+To ensure consistent event creation across the system:
+
+**Module**: `lib/mosaic/events/helpers.ex`
+
+```elixir
+defmodule Mosaic.Events.Helpers do
+  @moduledoc """
+  Helper functions for event creation following best practices.
+  """
+  
+  alias Mosaic.Repo
+  alias Mosaic.Events
+  alias Mosaic.Participations.Participation
+  
+  @doc """
+  Creates an event with a single participant.
+  Follows the proper event type lookup pattern.
+  """
+  def create_event_with_participant(event_type_name, participant_id, participation_type, attrs) do
+    Repo.transaction(fn ->
+      with {:ok, event_type} <- Events.get_event_type_by_name(event_type_name),
+           event_attrs <- Map.put(attrs, "event_type_id", event_type.id),
+           {:ok, event} <- Events.create_event(event_attrs),
+           participation_attrs <- %{
+             "participant_id" => participant_id,
+             "event_id" => event.id,
+             "participation_type" => participation_type
+           },
+           {:ok, participation} <-
+             %Participation{}
+             |> Participation.changeset(participation_attrs)
+             |> Repo.insert() do
+        {event, participation}
+      else
+        {:error, reason} -> Repo.rollback(reason)
+      end
+    end)
+  end
+  
+  @doc """
+  Creates an event with multiple participants.
+  """
+  def create_event_with_participants(event_type_name, participants, attrs) do
+    Repo.transaction(fn ->
+      with {:ok, event_type} <- Events.get_event_type_by_name(event_type_name),
+           event_attrs <- Map.put(attrs, "event_type_id", event_type.id),
+           {:ok, event} <- Events.create_event(event_attrs) do
+        
+        # Create all participations
+        participations =
+          Enum.map(participants, fn %{participant_id: pid, participation_type: ptype} ->
+            participation_attrs = %{
+              "participant_id" => pid,
+              "event_id" => event.id,
+              "participation_type" => ptype
+            }
+            
+            {:ok, participation} =
+              %Participation{}
+              |> Participation.changeset(participation_attrs)
+              |> Repo.insert()
+            
+            participation
+          end)
+        
+        {event, participations}
+      else
+        {:error, reason} -> Repo.rollback(reason)
+      end
+    end)
+  end
+end
+```
+
+**Usage (Internal - for Domain Context implementations):**
+
+**IMPORTANT:** These helpers are for implementing domain contexts, not for direct application use.
+
+```elixir
+# ❌ DON'T call these helpers directly from application code
+Mosaic.Events.Helpers.create_event_with_participant(...)
+
+# ✅ DO use domain contexts instead:
+Mosaic.Shifts.create_shift(employment_id, worker_id, attrs)
+Mosaic.Locations.create_location(attrs)
+Mosaic.Workers.create_worker(attrs)
+```
+
+**Example: Using helper inside a domain context implementation:**
+
+```elixir
+# Inside lib/mosaic/schedules.ex (implementation code)
+defmodule Mosaic.Schedules do
+  alias Mosaic.Events.Helpers
+
+  def create_schedule(location_id, attrs) do
+    # This context can use the helper internally
+    Helpers.create_event_with_participant(
+      "schedule",
+      location_id,
+      "location_scope",
+      %{
+        "start_time" => attrs.start_time,
+        "end_time" => attrs.end_time,
+        "status" => "draft",
+        "properties" => %{"timezone" => attrs[:timezone] || "UTC"}
+      }
+    )
+  end
+end
+
+# Application code should call:
+# Mosaic.Schedules.create_schedule(location_id, attrs)
+```
+
+---
+
+## Key Principles
+
+### 0. Two-Layer Architecture
+
+**Application Layer (Your Code):**
+- ✅ Always use domain contexts: `Shifts`, `Workers`, `Locations`, `Employments`
+- ❌ Never call `Events.create_event()` or `Entities.create_entity()` directly
+
+**Implementation Layer (Domain Context Code):**
+- ✅ Domain contexts call `Events.create_event()` internally
+- ✅ Use `Events.get_event_type_by_name()` for type lookup
+- ✅ Can use `Mosaic.Events.Helpers` for common patterns
+
+### 1. Always Use Event Type Lookup
+
+```elixir
+# ✓ CORRECT
+with {:ok, event_type} <- Events.get_event_type_by_name("shift") do
+  Events.create_event(%{"event_type_id" => event_type.id, ...})
+end
+
+# ✗ WRONG - events table has no event_type field
+Events.create_event(%{"event_type" => "shift", ...})
+```
+
+### 2. Use String Keys in Attrs
+
+```elixir
+# ✓ CORRECT
+%{"event_type_id" => id, "properties" => %{"location" => "A"}}
+
+# ✗ WRONG - mixing atom and string keys
+%{event_type_id: id, "properties" => %{"location" => "A"}}
+```
+
+### 3. Query With Proper Joins
+
+```elixir
+# ✓ CORRECT
+from e in Event,
+  join: et in EventType, on: e.event_type_id == et.id,
+  where: et.name == "shift"
+
+# ✗ WRONG - events table has no event_type field
+from e in Event,
+  where: e.event_type == "shift"
+```
+
+---
+
+## Benefits
+
+### Configuration-Driven
+- Blueprint system enables fast tenant provisioning
+- Jurisdiction configs support multi-country deployments
+- No code changes needed for new regions
+
+### Maintainable
+- Clear separation between code and configuration
+- Helper functions ensure consistent patterns
+- Centralized configuration management
+
+### Extensible
+- Easy to add new blueprints
+- Jurisdiction configs are just JSON files
+- Event creation helpers work for any event type
+
+## See Also
+
+- [01-events-and-participations.md](01-events-and-participations.md) - Core patterns
+- [03-event-types.md](03-event-types.md) - Event type system
+- [09-scheduling-model.md](09-scheduling-model.md) - Complex event creation examples

@@ -1,5 +1,7 @@
 # Entities
 
+> **Navigation:** [📚 Index](index.md) | [🎯 Start Here](00-start-here.md) | [🔴 Architecture](architecture.md)
+
 ## Overview
 
 Entities represent the actors and objects in the system that can participate in events. The entity model uses a polymorphic approach with type-specific properties stored as JSONB.
@@ -25,16 +27,23 @@ CREATE INDEX idx_entities_properties ON entities USING GIN(properties);
 
 The `Mosaic.Entities.Entity` schema is intentionally minimal and domain-agnostic:
 
+**Location:** `/mnt/project/entity.ex`
+
 ```elixir
 defmodule Mosaic.Entities.Entity do
   use Ecto.Schema
   import Ecto.Changeset
+  alias Mosaic.Participations.Participation
+
+  @primary_key {:id, :binary_id, autogenerate: true}
+  @foreign_key_type :binary_id
 
   schema "entities" do
     field :entity_type, :string
     field :properties, :map, default: %{}
 
     has_many :participations, Participation, foreign_key: :participant_id
+
     timestamps(type: :utc_datetime)
   end
 
@@ -66,6 +75,7 @@ Domain-specific entity types are implemented as **wrapper modules** that add val
 **Wrapper Module:** `Mosaic.Workers.Worker`
 **Context Module:** `Mosaic.Workers`
 **Entity Type:** `"person"`
+**Locations:** `/mnt/project/worker.ex` (wrapper), `/mnt/project/workers.ex` (context)
 
 Represents people who perform work.
 
@@ -73,10 +83,16 @@ Represents people who perform work.
 - `name` (string, required) - Full name
 - `email` (string, required) - Contact email
 - `phone` (string, optional) - Contact phone number
+- `address` (string, optional) - Physical address
+- `emergency_contact` (map, optional) - Emergency contact information
 
 **Implementation:**
 ```elixir
 defmodule Mosaic.Workers.Worker do
+  @moduledoc """
+  Domain-specific module for Worker entities.
+  """
+
   import Ecto.Changeset
   alias Mosaic.Entities.Entity
 
@@ -84,6 +100,11 @@ defmodule Mosaic.Workers.Worker do
     entity
     |> Entity.changeset(Map.put(attrs, "entity_type", "person"))
     |> validate_worker_properties()
+  end
+
+  def new(attrs \\ %{}) do
+    %Entity{entity_type: "person", properties: %{}}
+    |> changeset(attrs)
   end
 
   defp validate_worker_properties(changeset) do
@@ -97,6 +118,30 @@ defmodule Mosaic.Workers.Worker do
         add_error(changeset, :properties, "must be a map")
     end
   end
+
+  defp validate_property_present(changeset, props, key, message) do
+    value = Map.get(props, key)
+
+    if is_nil(value) or value == "" do
+      add_error(changeset, :properties, message, field: key)
+    else
+      changeset
+    end
+  end
+
+  defp validate_email_format(changeset, props) do
+    email = Map.get(props, "email")
+
+    if email && !String.match?(email, ~r/@/) do
+      add_error(changeset, :properties, "Email must be valid", field: "email")
+    else
+      changeset
+    end
+  end
+
+  # Helper functions
+  def name(%Entity{properties: properties}), do: Map.get(properties, "name")
+  def email(%Entity{properties: properties}), do: Map.get(properties, "email")
 end
 ```
 
@@ -106,18 +151,63 @@ end
 - Participates in work periods and breaks as "worker"
 
 **Context Functions:**
-- `Mosaic.Workers.list_workers/0`
-- `Mosaic.Workers.get_worker!/1`
-- `Mosaic.Workers.create_worker/1`
-- `Mosaic.Workers.update_worker/2`
-- `Mosaic.Workers.delete_worker/1`
-- `Mosaic.Workers.search_workers/1`
+```elixir
+defmodule Mosaic.Workers do
+  import Ecto.Query
+  alias Mosaic.Repo
+  alias Mosaic.Entities.Entity
+  alias Mosaic.Workers.Worker
+
+  def list_workers do
+    from(e in Entity,
+      where: e.entity_type == "person",
+      order_by: [asc: fragment("?->>'name'", e.properties)]
+    )
+    |> Repo.all()
+  end
+
+  def get_worker!(id) do
+    entity = Repo.get!(Entity, id) |> Repo.preload(participations: [:event])
+
+    if entity.entity_type != "person" do
+      raise Ecto.NoResultsError, queryable: Entity
+    end
+
+    entity
+  end
+
+  def create_worker(attrs \\ %{}) do
+    %Entity{}
+    |> Worker.changeset(attrs)
+    |> Repo.insert()
+  end
+
+  def update_worker(%Entity{} = worker, attrs) do
+    worker
+    |> Worker.changeset(attrs)
+    |> Repo.update()
+  end
+
+  def search_workers(query_string) when is_binary(query_string) do
+    search_pattern = "%#{query_string}%"
+
+    from(e in Entity,
+      where: e.entity_type == "person",
+      where:
+        ilike(fragment("?->>'name'", e.properties), ^search_pattern) or
+        ilike(fragment("?->>'email'", e.properties), ^search_pattern),
+      order_by: [asc: fragment("?->>'name'", e.properties)]
+    )
+    |> Repo.all()
+  end
+end
+```
 
 **Example:**
 ```elixir
 # Creating via context
 {:ok, worker} = Mosaic.Workers.create_worker(%{
-  properties: %{
+  "properties" => %{
     "name" => "John Doe",
     "email" => "john@example.com",
     "phone" => "555-0123"
@@ -140,6 +230,7 @@ end
 **Wrapper Module:** `Mosaic.Locations.Location`
 **Context Module:** `Mosaic.Locations`
 **Entity Type:** `"location"`
+**Locations:** `/mnt/project/location.ex` (wrapper), `/mnt/project/locations.ex` (context)
 
 Represents physical work locations.
 
@@ -153,6 +244,10 @@ Represents physical work locations.
 **Implementation:**
 ```elixir
 defmodule Mosaic.Locations.Location do
+  @moduledoc """
+  Domain-specific module for Location entities.
+  """
+
   import Ecto.Changeset
   alias Mosaic.Entities.Entity
 
@@ -160,6 +255,11 @@ defmodule Mosaic.Locations.Location do
     entity
     |> Entity.changeset(Map.put(attrs, "entity_type", "location"))
     |> validate_location_properties()
+  end
+
+  def new(attrs \\ %{}) do
+    %Entity{entity_type: "location", properties: %{}}
+    |> changeset(attrs)
   end
 
   defp validate_location_properties(changeset) do
@@ -173,6 +273,30 @@ defmodule Mosaic.Locations.Location do
         add_error(changeset, :properties, "must be a map")
     end
   end
+
+  defp validate_property_present(changeset, props, key, message) do
+    value = Map.get(props, key)
+
+    if is_nil(value) or value == "" do
+      add_error(changeset, :properties, message, field: key)
+    else
+      changeset
+    end
+  end
+
+  defp validate_capacity(changeset, props) do
+    capacity = Map.get(props, "capacity")
+
+    if capacity && (!is_integer(capacity) || capacity < 0) do
+      add_error(changeset, :properties, "Capacity must be a positive integer", field: "capacity")
+    else
+      changeset
+    end
+  end
+
+  # Helper functions
+  def name(%Entity{properties: properties}), do: Map.get(properties, "name")
+  def address(%Entity{properties: properties}), do: Map.get(properties, "address")
 end
 ```
 
@@ -181,13 +305,50 @@ end
 - Can have capacity constraints for scheduling
 
 **Context Functions:**
-- `Mosaic.Locations.list_locations/0`
-- `Mosaic.Locations.get_location!/1`
-- `Mosaic.Locations.create_location/1`
-- `Mosaic.Locations.update_location/2`
-- `Mosaic.Locations.delete_location/1`
-- `Mosaic.Locations.search_locations/1`
-- `Mosaic.Locations.get_locations_with_capacity/1`
+```elixir
+defmodule Mosaic.Locations do
+  import Ecto.Query
+  alias Mosaic.Repo
+  alias Mosaic.Entities.Entity
+  alias Mosaic.Locations.Location
+
+  def list_locations do
+    from(e in Entity,
+      where: e.entity_type == "location",
+      order_by: [asc: fragment("?->>'name'", e.properties)]
+    )
+    |> Repo.all()
+  end
+
+  def create_location(attrs \\ %{}) do
+    %Entity{}
+    |> Location.changeset(attrs)
+    |> Repo.insert()
+  end
+
+  def search_locations(query_string) when is_binary(query_string) do
+    search_pattern = "%#{query_string}%"
+
+    from(e in Entity,
+      where: e.entity_type == "location",
+      where:
+        ilike(fragment("?->>'name'", e.properties), ^search_pattern) or
+        ilike(fragment("?->>'address'", e.properties), ^search_pattern),
+      order_by: [asc: fragment("?->>'name'", e.properties)]
+    )
+    |> Repo.all()
+  end
+
+  def get_locations_with_capacity(min_capacity) when is_integer(min_capacity) do
+    from(e in Entity,
+      where: e.entity_type == "location",
+      where: fragment("(?->>'capacity')::integer >= ?", e.properties, ^min_capacity),
+      order_by: [asc: fragment("?->>'name'", e.properties)]
+    )
+    |> Repo.all()
+  end
+end
+```
 
 ### Future Entity Types
 
@@ -216,13 +377,13 @@ The wrapper pattern makes it easy to add new entity types without modifying core
 ### Finding Entities by Type
 ```elixir
 from e in Entity,
-  where: e.entity_type == "worker"
+  where: e.entity_type == "person"
 ```
 
 ### Querying Properties
 ```elixir
 from e in Entity,
-  where: e.entity_type == "worker",
+  where: e.entity_type == "person",
   where: fragment("?->>'name' ILIKE ?", e.properties, ^"%#{name}%")
 ```
 
@@ -264,10 +425,14 @@ defmodule Mosaic.Workers.Worker do
         changeset
         |> validate_property_present(props, "name", "Name is required")
         |> validate_property_present(props, "email", "Email is required")
-        |> validate_email_format(props)
       _ ->
         add_error(changeset, :properties, "must be a map")
     end
+  end
+
+  defp validate_property_present(changeset, props, key, message) do
+    value = Map.get(props, key)
+    if is_nil(value) or value == "", do: add_error(changeset, :properties, message, field: key), else: changeset
   end
 end
 ```
@@ -294,81 +459,6 @@ A single entity can have multiple participations across different events, each w
 - Temporal bounds
 - Participation-specific properties
 
-## Context Modules
-
-Each entity type wrapper has a corresponding context module that provides business operations:
-
-### Workers Context
-
-**Module:** `Mosaic.Workers`
-**Implementation:** `lib/mosaic/workers.ex`
-
-The Workers context manages worker (person) entities:
-
-**Functions:**
-- `list_workers/0` - Get all workers
-- `get_worker!/1` - Get worker by ID (raises if not found or wrong type)
-- `create_worker/1` - Create new worker with validation
-- `update_worker/2` - Update worker properties
-- `delete_worker/1` - Delete worker
-- `change_worker/2` - Get changeset for forms
-- `search_workers/1` - Search by name or email
-- `worker_exists_with_email?/1` - Check for duplicate email
-
-**Example Usage:**
-```elixir
-# List all workers
-workers = Mosaic.Workers.list_workers()
-
-# Create a worker
-{:ok, worker} = Mosaic.Workers.create_worker(%{
-  properties: %{
-    "name" => "Jane Smith",
-    "email" => "jane@example.com",
-    "phone" => "555-9876"
-  }
-})
-
-# Search for workers
-results = Mosaic.Workers.search_workers("jane")
-```
-
-### Locations Context
-
-**Module:** `Mosaic.Locations`
-**Implementation:** `lib/mosaic/locations.ex`
-
-The Locations context manages location entities:
-
-**Functions:**
-- `list_locations/0` - Get all locations
-- `get_location!/1` - Get location by ID (raises if not found or wrong type)
-- `create_location/1` - Create new location with validation
-- `update_location/2` - Update location properties
-- `delete_location/1` - Delete location
-- `change_location/2` - Get changeset for forms
-- `search_locations/1` - Search by name or address
-- `get_locations_by_ids/1` - Batch fetch by IDs
-- `get_locations_with_capacity/1` - Find locations with minimum capacity
-
-**Example Usage:**
-```elixir
-# List all locations
-locations = Mosaic.Locations.list_locations()
-
-# Create a location
-{:ok, location} = Mosaic.Locations.create_location(%{
-  properties: %{
-    "name" => "Downtown Office",
-    "address" => "123 Main St",
-    "capacity" => 50
-  }
-})
-
-# Find locations with capacity for 25+ people
-large_locations = Mosaic.Locations.get_locations_with_capacity(25)
-```
-
 ## Extension Points
 
 ### Adding New Entity Types
@@ -393,13 +483,11 @@ defmodule Mosaic.Organizations.Organization do
         changeset
         |> validate_property_present(props, "name", "Name is required")
         |> validate_property_present(props, "tax_id", "Tax ID is required")
-        # Add more validations as needed
       _ ->
         add_error(changeset, :properties, "must be a map")
     end
   end
 
-  # Helper functions
   def name(%Entity{properties: properties}), do: Map.get(properties, "name")
   def tax_id(%Entity{properties: properties}), do: Map.get(properties, "tax_id")
 end
@@ -421,32 +509,10 @@ defmodule Mosaic.Organizations do
     |> Repo.all()
   end
 
-  def get_organization!(id) do
-    entity = Repo.get!(Entity, id)
-    if entity.entity_type != "organization" do
-      raise Ecto.NoResultsError, queryable: Entity
-    end
-    entity
-  end
-
   def create_organization(attrs \\ %{}) do
     %Entity{}
     |> Organization.changeset(attrs)
     |> Repo.insert()
-  end
-
-  def update_organization(%Entity{} = organization, attrs) do
-    organization
-    |> Organization.changeset(attrs)
-    |> Repo.update()
-  end
-
-  def delete_organization(%Entity{} = organization) do
-    Repo.delete(organization)
-  end
-
-  def change_organization(%Entity{} = organization, attrs \\ %{}) do
-    Organization.changeset(organization, attrs)
   end
 end
 ```
@@ -464,40 +530,40 @@ end
 ## Benefits
 
 ### Domain-Agnostic Core
-- **Core schemas have zero domain knowledge** - Entity schema doesn't know about workers, locations, etc.
-- **Easy to maintain** - Core logic never changes when adding new domains
-- **Clear separation** - Business logic lives in wrappers, not core schemas
-- **Testable** - Core and domain layers can be tested independently
+- Core schemas have zero domain knowledge
+- Easy to maintain - core logic never changes
+- Clear separation of concerns
+- Testable independently
 
 ### Flexibility
-- **No schema migrations** for new entity types
-- **Type-specific properties** via JSONB
-- **Extensible without modification** - Add new types by creating wrappers
-- **Properties indexed** with GIN for efficient querying
+- No schema migrations for new entity types
+- Type-specific properties via JSONB
+- Extensible without modification
+- Properties indexed with GIN for efficient querying
 
 ### Consistency
-- **Single entities table** maintains referential integrity
-- **Uniform participation** mechanism across all entity types
-- **Standardized patterns** - All entity types follow same wrapper pattern
-- **Centralized storage** - All entities in one table with consistent schema
+- Single entities table maintains referential integrity
+- Uniform participation mechanism
+- Standardized patterns
+- Centralized storage
 
 ### Type Safety
-- **Wrapper contexts provide type-specific interfaces**
-- **Domain validation** happens at wrapper layer
-- **Context functions** enforce correct entity types
-- **Compile-time safety** - Wrong entity type usage caught early
+- Wrapper contexts provide type-specific interfaces
+- Domain validation at wrapper layer
+- Context functions enforce correct types
+- Compile-time safety
 
 ### Scalability
-- **Support diverse entity types** without database changes
-- **Properties grow independently** per type
-- **Cross-domain queries remain efficient** (all in one table)
-- **Parallel development** - Teams can add entity types independently
+- Support diverse entity types without database changes
+- Properties grow independently per type
+- Cross-domain queries remain efficient
+- Parallel development possible
 
 ### Database Integrity
-- **Foreign key constraints work** - participations.participant_id references entities.id
-- **Cross-type queries possible** - "All events for any participant"
-- **Efficient joins** - No need for polymorphic associations
-- **Single source of truth** - One entities table, not separate tables per type
+- Foreign key constraints work properly
+- Cross-type queries possible
+- Efficient joins
+- Single source of truth
 
 ## Architecture Summary
 
@@ -533,6 +599,6 @@ end
 
 ## See Also
 
-- [01-events-and-participations.md](01-events-and-participations.md) - How entities participate in events and the domain-agnostic architecture
+- [01-events-and-participations.md](01-events-and-participations.md) - How entities participate in events
 - [03-event-types.md](03-event-types.md) - Event type wrapper pattern (parallel to entity wrappers)
 - [08-properties-pattern.md](08-properties-pattern.md) - How JSONB properties enable flexibility

@@ -1,5 +1,7 @@
 # Event Types
 
+> **Navigation:** [📚 Index](index.md) | [🎯 Start Here](00-start-here.md) | [🔴 Architecture](architecture.md)
+
 ## Overview
 
 Event types define the polymorphic behavior system that allows different kinds of events to have custom validation, business logic, and properties while sharing a common data structure.
@@ -61,10 +63,18 @@ Current event types in the system:
 
 The `Mosaic.Events.Event` schema is intentionally minimal and domain-agnostic:
 
+**Location:** `/mnt/project/event.ex`
+
 ```elixir
 defmodule Mosaic.Events.Event do
   use Ecto.Schema
   import Ecto.Changeset
+
+  alias Mosaic.Events.EventType
+  alias Mosaic.Participations.Participation
+
+  @primary_key {:id, :binary_id, autogenerate: true}
+  @foreign_key_type :binary_id
 
   schema "events" do
     field :start_time, :utc_datetime
@@ -80,13 +90,27 @@ defmodule Mosaic.Events.Event do
     timestamps(type: :utc_datetime)
   end
 
+  @valid_statuses ~w(draft active completed cancelled)
+
   def changeset(event, attrs) do
-    # Generic validation only - no domain logic
     event
     |> cast(attrs, [:event_type_id, :parent_id, :start_time, :end_time, :status, :properties])
     |> validate_required([:event_type_id, :start_time])
-    |> validate_time_order()
-    |> validate_inclusion(:status, ["draft", "active", "completed", "cancelled", "ended"])
+    |> validate_inclusion(:status, @valid_statuses)
+    |> validate_time_range()
+    |> foreign_key_constraint(:event_type_id)
+    |> foreign_key_constraint(:parent_id)
+  end
+
+  defp validate_time_range(changeset) do
+    start_time = get_field(changeset, :start_time)
+    end_time = get_field(changeset, :end_time)
+
+    if start_time && end_time && DateTime.compare(end_time, start_time) != :gt do
+      add_error(changeset, :end_time, "must be after start time")
+    else
+      changeset
+    end
   end
 end
 ```
@@ -100,16 +124,23 @@ end
 
 Event types implement custom logic through the `Mosaic.Events.EventTypeBehaviour` protocol. This allows the system to dispatch to type-specific implementations without maintaining a registry of modules.
 
+**Location:** `/mnt/project/event_type_behaviour.ex`
+
 ```elixir
 defprotocol Mosaic.Events.EventTypeBehaviour do
-  @doc """
-  Returns a changeset for the event with event type-specific validations.
+  @moduledoc """
+  Protocol for event type-specific implementations.
   """
+
   @spec changeset(t(), Ecto.Schema.t(), map()) :: Ecto.Changeset.t()
   def changeset(event_type, event, attrs)
 end
 
 defimpl Mosaic.Events.EventTypeBehaviour, for: Mosaic.Events.EventType do
+  @moduledoc """
+  Protocol implementation that dispatches to event type-specific modules based on name.
+  """
+
   alias Mosaic.Events.Event
 
   def changeset(%Mosaic.Events.EventType{name: "shift"}, event, attrs) do
@@ -146,6 +177,7 @@ defmodule Mosaic.TimeOff.TimeOffEvent do
   """
 
   import Ecto.Changeset
+  import Mosaic.ChangesetHelpers
   alias Mosaic.Events.Event
 
   @property_fields [:reason, :approval_status, :approver_id]
@@ -153,35 +185,26 @@ defmodule Mosaic.TimeOff.TimeOffEvent do
   def changeset(event, attrs) do
     event
     |> Event.changeset(attrs)  # Use core schema first
-    |> cast_properties(attrs)  # Add domain-specific properties
+    |> cast_properties(attrs, @property_fields)  # Add domain properties
     |> validate_time_off_rules()  # Add domain validation
   end
 
-  defp cast_properties(changeset, attrs) do
-    properties = get_field(changeset, :properties, %{})
-
-    updated_properties =
-      Enum.reduce(@property_fields, properties, fn field, acc ->
-        field_str = to_string(field)
-        case Map.get(attrs, field) || Map.get(attrs, field_str) do
-          nil -> acc
-          value -> Map.put(acc, field_str, value)
-        end
-      end)
-
-    put_change(changeset, :properties, updated_properties)
-  end
-
   defp validate_time_off_rules(changeset) do
-    # Custom validation logic (e.g., approval_status must be valid)
-    changeset
+    case changeset.action do
+      nil -> changeset
+      _ ->
+        properties = get_field(changeset, :properties) || %{}
+        
+        changeset
+        |> validate_property_presence(properties, "reason", "Reason is required")
+    end
   end
 end
 ```
 
 **Step 2: Add protocol implementation**
 
-Add pattern match clause in `lib/mosaic/events/event_type_behaviour.ex`:
+Add pattern match clause in `/mnt/project/event_type_behaviour.ex`:
 
 ```elixir
 defimpl Mosaic.Events.EventTypeBehaviour, for: Mosaic.Events.EventType do
@@ -207,11 +230,26 @@ defmodule Mosaic.TimeOff do
     )
   end
 
-  def create_time_off_request(attrs) do
-    Events.create_event(attrs)
+  def create_time_off_request(worker_id, attrs) do
+    Repo.transaction(fn ->
+      with {:ok, event_type} <- Events.get_event_type_by_name("time_off"),
+           attrs <- Map.put(attrs, "event_type_id", event_type.id),
+           {:ok, event} <- Events.create_event(attrs),
+           participation_attrs <- %{
+             "participant_id" => worker_id,
+             "event_id" => event.id,
+             "participation_type" => "requestor"
+           },
+           {:ok, _participation} <- 
+             %Participation{}
+             |> Participation.changeset(participation_attrs)
+             |> Repo.insert() do
+        event
+      else
+        {:error, reason} -> Repo.rollback(reason)
+      end
+    end)
   end
-
-  # Additional business logic functions
 end
 ```
 
@@ -236,10 +274,13 @@ Repo.insert!(%Mosaic.Events.EventType{
 Each event type defines which properties it supports via `@property_fields`:
 
 ### Employment Properties
+**Location:** `/mnt/project/employment.ex`
+- `role` - Job role/title
 - `contract_type` - Type of employment contract
 - `salary` - Compensation amount
 
 ### Shift Properties
+**Location:** `/mnt/project/shift.ex`
 - `location` - Where the shift takes place
 - `department` - Department/team assignment
 - `notes` - Additional shift notes
@@ -252,14 +293,14 @@ Each event type defines which properties it supports via `@property_fields`:
 Event types handle two levels of validation:
 
 ### 1. Base Event Validation
-Handled by `Mosaic.Event.changeset/2`:
+Handled by `Mosaic.Events.Event.changeset/2`:
 - `event_type_id` required
 - `start_time` required
 - `end_time` must be after `start_time` (if provided)
 - `status` must be valid
 
 ### 2. Type-Specific Validation
-Handled by event type modules:
+Handled by event type wrapper modules:
 - Required properties (e.g., location for shifts)
 - Property format validation
 - Business rule validation
@@ -267,27 +308,44 @@ Handled by event type modules:
 
 ## Dispatch Mechanism
 
-The `Mosaic.Events` module dispatches to type-specific changesets using the protocol:
+The `Mosaic.Events` context dispatches to type-specific changesets using the protocol:
+
+**Location:** `/mnt/project/events.ex`
 
 ```elixir
-defp get_changeset_for_event_type(%Event{} = event, attrs) do
-  event_type_id =
-    Map.get(attrs, :event_type_id) ||
-    Map.get(attrs, "event_type_id") ||
-    event.event_type_id
+defmodule Mosaic.Events do
+  # ... other functions ...
 
-  case event_type_id do
-    nil ->
-      Event.changeset(event, attrs)
+  def create_event(attrs \\ %{}) do
+    %Event{}
+    |> get_changeset_for_event_type(attrs)
+    |> Repo.insert()
+  end
 
-    id ->
-      case Repo.get(EventType, id) do
-        %EventType{} = event_type ->
-          Mosaic.EventTypeBehaviour.changeset(event_type, event, attrs)
+  def update_event(%Event{} = event, attrs) do
+    event
+    |> get_changeset_for_event_type(attrs)
+    |> Repo.update()
+  end
 
-        nil ->
-          Event.changeset(event, attrs)
-      end
+  # Gets the appropriate changeset based on event type
+  defp get_changeset_for_event_type(%Event{} = event, attrs) do
+    event_type_id =
+      Map.get(attrs, :event_type_id) || Map.get(attrs, "event_type_id") || event.event_type_id
+
+    case event_type_id do
+      nil ->
+        Event.changeset(event, attrs)
+
+      id ->
+        case Repo.get(EventType, id) do
+          %EventType{} = event_type ->
+            Mosaic.Events.EventTypeBehaviour.changeset(event_type, event, attrs)
+
+          nil ->
+            Event.changeset(event, attrs)
+        end
+    end
   end
 end
 ```
@@ -303,8 +361,9 @@ This protocol-based approach ensures:
 
 Each major event type has a context module:
 
-- `Mosaic.Employments` - Employment management
-- `Mosaic.Shifts` - Shift scheduling
+- `Mosaic.Events` (at `/mnt/project/events.ex`) - Generic event operations
+- `Mosaic.Employments` (at `/mnt/project/employments.ex`) - Employment management
+- `Mosaic.Shifts` (at `/mnt/project/shifts.ex`) - Shift scheduling
 - Future: `Mosaic.TimeOff`, `Mosaic.Trainings`, etc.
 
 Context modules provide:
@@ -341,7 +400,7 @@ New event types are added without:
 - Protocol ensures consistent interface across all types
 - Pattern matching makes dispatch logic explicit
 - Adding new types requires only:
-  1. Creating the event type module
+  1. Creating the event type wrapper module
   2. Adding one pattern match clause to the protocol implementation
   3. Seeding the database
 
@@ -402,8 +461,7 @@ The event type system follows a strict **domain-agnostic core with wrapper patte
 
 ## See Also
 
-- [01-events-and-participations.md](01-events-and-participations.md) - Core event model and domain-agnostic architecture
+- [01-events-and-participations.md](01-events-and-participations.md) - Core event model
 - [02-entities.md](02-entities.md) - Entity wrapper pattern (parallel to event wrappers)
 - [08-properties-pattern.md](08-properties-pattern.md) - Detailed properties implementation
-- [05-employments.md](05-employments.md) - Employment event type wrapper
-- [06-shifts.md](06-shifts.md) - Shift event type wrapper
+- [04-temporal-modeling.md](04-temporal-modeling.md) - Temporal validation patterns

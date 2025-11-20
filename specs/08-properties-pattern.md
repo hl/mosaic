@@ -1,5 +1,7 @@
 # Properties Pattern
 
+> **Navigation:** [📚 Index](index.md) | [🎯 Start Here](00-start-here.md) | [🔴 Architecture](architecture.md)
+
 ## Overview
 
 The properties pattern uses PostgreSQL's JSONB columns to store type-specific data without schema migrations, while maintaining the ability to validate and query this data efficiently.
@@ -343,5 +345,5 @@ Properties can't have foreign keys - use regular columns for references that nee
 ## See Also
 
 - [03-event-types.md](03-event-types.md) - Event type system overview
-- [06-shifts.md](06-shifts.md) - Shift properties example
-- [05-employments.md](05-employments.md) - Employment properties example
+- [09-scheduling-model.md](09-scheduling-model.md) - Shift and employment implementation examples
+- [01-events-and-participations.md](01-events-and-participations.md) - Core event-participation model

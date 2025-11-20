@@ -1,5 +1,7 @@
 # Events and Participations
 
+> **Navigation:** [📚 Index](index.md) | [🎯 Start Here](00-start-here.md) | [🔴 Architecture](architecture.md)
+
 ## Overview
 
 The core of Mosaic's data model is the **event-participation pattern**, which treats all temporal business operations as events with associated participants.
@@ -11,7 +13,7 @@ The core of Mosaic's data model is the **event-participation pattern**, which tr
 **Event**: A time-bounded occurrence with:
 - A specific type (employment, shift, work period, break)
 - Start and end times
-- A status (draft, active, completed, cancelled, ended)
+- A status (draft, active, completed, cancelled)
 - Optional hierarchical relationships (parent/child)
 - Type-specific properties stored as JSONB
 
@@ -94,7 +96,7 @@ CREATE TABLE events (
 - `parent_id` - Self-referential FK for nesting (e.g., shift belongs to employment)
 - `start_time` - Required start of event
 - `end_time` - Optional end (null means ongoing)
-- `status` - Lifecycle state: draft, active, completed, cancelled, ended
+- `status` - Lifecycle state: draft, active, completed, cancelled
 - `properties` - Type-specific data as JSONB
 
 ### Participations Table
@@ -173,7 +175,6 @@ Events progress through defined states:
 - **active** - Currently in effect
 - **completed** - Successfully finished
 - **cancelled** - Terminated before completion
-- **ended** - Concluded (used for employments)
 
 ```mermaid
 stateDiagram-v2
@@ -182,10 +183,8 @@ stateDiagram-v2
     draft --> cancelled : cancel
     active --> completed : complete
     active --> cancelled : cancel
-    active --> ended : end (employment only)
     completed --> [*]
     cancelled --> [*]
-    ended --> [*]
 ```
 
 State transitions are enforced at the application level.
@@ -213,14 +212,15 @@ Child events must fall within parent temporal bounds:
 ```elixir
 alias Mosaic.Events.Event
 alias Mosaic.Participations.Participation
+alias Mosaic.Events.EventType
 
 def get_worker_shifts(worker_id, start_date, end_date) do
   from e in Event,
-    join: et in assoc(e, :event_type),
-    join: p in Participation,
-    on: p.event_id == e.id,
+    join: et in EventType, on: e.event_type_id == et.id,
+    join: p in Participation, on: p.event_id == e.id,
     where: et.name == "shift",
     where: p.participant_id == ^worker_id,
+    where: p.participation_type == "worker",
     where: e.start_time >= ^start_date,
     where: e.start_time <= ^end_date,
     where: e.status != "cancelled",
@@ -235,7 +235,7 @@ end
 ```elixir
 def get_employment_shifts(employment_id) do
   from e in Event,
-    join: et in assoc(e, :event_type),
+    join: et in EventType, on: e.event_type_id == et.id,
     where: et.name == "shift",
     where: e.parent_id == ^employment_id,
     where: e.status != "cancelled",
@@ -250,11 +250,11 @@ end
 ```elixir
 def get_active_employment(worker_id) do
   from e in Event,
-    join: et in assoc(e, :event_type),
-    join: p in Participation,
-    on: p.event_id == e.id,
+    join: et in EventType, on: e.event_type_id == et.id,
+    join: p in Participation, on: p.event_id == e.id,
     where: et.name == "employment",
     where: p.participant_id == ^worker_id,
+    where: p.participation_type == "employee",
     where: e.status == "active",
     where: is_nil(e.end_time) or e.end_time > ^DateTime.utc_now(),
     order_by: [desc: e.start_time],
@@ -264,179 +264,25 @@ def get_active_employment(worker_id) do
 end
 ```
 
-#### 4. Total hours worked by a person in a time period
+#### 4. Worker's schedule for a week
 
 ```elixir
-def calculate_hours_worked(worker_id, start_date, end_date) do
+def get_weekly_schedule(worker_id, week_start) do
+  week_end = DateTime.add(week_start, 7 * 24 * 3600, :second)
+  
   from e in Event,
-    join: et in assoc(e, :event_type),
-    join: p in Participation,
-    on: p.event_id == e.id,
-    join: wp in Event,
-    on: wp.parent_id == e.id,
-    join: wp_et in assoc(wp, :event_type),
+    join: et in EventType, on: e.event_type_id == et.id,
+    join: p in Participation, on: p.event_id == e.id,
     where: et.name == "shift",
-    where: wp_et.name == "work_period",
     where: p.participant_id == ^worker_id,
-    where: e.start_time >= ^start_date,
-    where: e.start_time <= ^end_date,
-    where: e.status in ["active", "completed"],
-    where: not is_nil(wp.start_time),
-    where: not is_nil(wp.end_time),
-    select: %{
-      total_seconds: fragment(
-        "SUM(EXTRACT(EPOCH FROM (? - ?)))",
-        wp.end_time,
-        wp.start_time
-      )
-    }
-  |> Repo.one()
-  |> case do
-    %{total_seconds: nil} -> 0.0
-    %{total_seconds: seconds} -> seconds / 3600
-  end
-end
-```
-
-#### 5. Find workers scheduled for a shift at a specific location
-
-```elixir
-def get_workers_at_location(location, date) do
-  from e in Event,
-    join: et in assoc(e, :event_type),
-    join: p in Participation,
-    on: p.event_id == e.id,
-    join: worker in Entity,
-    on: worker.id == p.participant_id,
-    where: et.name == "shift",
-    where: fragment("?->>? = ?", e.properties, "location", ^location),
-    where: fragment("DATE(?)", e.start_time) == ^date,
-    where: e.status != "cancelled",
-    select: %{
-      worker: worker,
-      shift_start: e.start_time,
-      shift_end: e.end_time
-    }
+    where: p.participation_type == "worker",
+    where: e.start_time >= ^week_start,
+    where: e.start_time < ^week_end,
+    where: e.status in ["draft", "active"],
+    order_by: [asc: e.start_time],
+    preload: [:event_type, :parent]
   |> Repo.all()
 end
-```
-
-#### 6. Find all events for a person (across types)
-
-```elixir
-def get_all_worker_events(worker_id, opts \\ []) do
-  query =
-    from e in Event,
-      join: p in Participation,
-      on: p.event_id == e.id,
-      where: p.participant_id == ^worker_id,
-      order_by: [desc: e.start_time],
-      preload: [:event_type, :parent, participations: :participant]
-
-  query =
-    if start_date = opts[:start_date] do
-      where(query, [e], e.start_time >= ^start_date)
-    else
-      query
-    end
-
-  query =
-    if end_date = opts[:end_date] do
-      where(query, [e], e.start_time <= ^end_date)
-    else
-      query
-    end
-
-  query =
-    if event_type = opts[:event_type] do
-      from [e, p] in query,
-        join: et in assoc(e, :event_type),
-        where: et.name == ^event_type
-    else
-      query
-    end
-
-  Repo.all(query)
-end
-```
-
-#### 7. Check for scheduling conflicts (overlapping shifts)
-
-```elixir
-def has_scheduling_conflict?(worker_id, start_time, end_time, exclude_event_id \\ nil) do
-  query =
-    from e in Event,
-      join: et in assoc(e, :event_type),
-      join: p in Participation,
-      on: p.event_id == e.id,
-      where: et.name == "shift",
-      where: p.participant_id == ^worker_id,
-      where: e.status != "cancelled",
-      where: not is_nil(e.start_time),
-      where: not is_nil(e.end_time),
-      where:
-        (e.start_time <= ^start_time and e.end_time > ^start_time) or
-        (e.start_time < ^end_time and e.end_time >= ^end_time) or
-        (e.start_time >= ^start_time and e.end_time <= ^end_time)
-
-  query =
-    if exclude_event_id do
-      where(query, [e], e.id != ^exclude_event_id)
-    else
-      query
-    end
-
-  Repo.exists?(query)
-end
-```
-
-#### 8. Get shifts with their work periods and breaks
-
-```elixir
-def get_shift_details(shift_id) do
-  from e in Event,
-    where: e.id == ^shift_id,
-    preload: [
-      :event_type,
-      :parent,
-      children: [:event_type],
-      participations: [participant: [:participations]]
-    ]
-  |> Repo.one()
-end
-```
-
-### Generic Query Patterns
-
-#### Finding Events by Type
-```elixir
-from e in Event,
-  join: et in assoc(e, :event_type),
-  where: et.name == "shift"
-```
-
-#### Finding Events for a Participant
-```elixir
-from e in Event,
-  join: p in assoc(e, :participations),
-  where: p.participant_id == ^worker_id
-```
-
-#### Finding Events in Time Range
-```elixir
-from e in Event,
-  where: e.start_time >= ^start_date,
-  where: e.start_time <= ^end_date
-```
-
-#### Finding Overlapping Events
-```elixir
-from e in Event,
-  where: not is_nil(e.start_time),
-  where: not is_nil(e.end_time),
-  where: (e.start_time <= ^new_start and e.end_time > ^new_start) or
-         (e.start_time < ^new_end and e.end_time >= ^new_end) or
-         (e.start_time >= ^new_start and e.end_time <= ^new_end)
 ```
 
 ## Benefits of This Model
@@ -475,24 +321,24 @@ These three core schemas have **zero knowledge** of any business domain concepts
 - Generic temporal fact representation
 - Fields: `event_type_id`, `parent_id`, `start_time`, `end_time`, `status`, `properties`
 - No awareness of shifts, employments, or any specific event type
-- Located at: `lib/mosaic/events/event.ex`
+- Located at: `/mnt/project/event.ex`
 
 **Entity** (`Mosaic.Entities.Entity`)
 - Generic participant representation
 - Fields: `entity_type`, `properties`
 - No awareness of workers, locations, organizations, or any specific entity type
 - Only validates format (lowercase letters and underscores)
-- Located at: `lib/mosaic/entities/entity.ex`
+- Located at: `/mnt/project/entity.ex`
 
 **Participation** (`Mosaic.Participations.Participation`)
 - Generic relationship between entities and events
 - Fields: `participant_id`, `event_id`, `participation_type`, `role`, `start_time`, `end_time`, `properties`
 - No awareness of specific participation types
-- Located at: `lib/mosaic/participations/participation.ex`
+- Located at: `/mnt/project/participation.ex`
 
 ### Domain Wrapper Pattern
 
-Domain-specific logic is implemented through **wrapper contexts** that build on top of core schemas:
+Domain-specific logic is implemented through **wrapper modules** that build on top of core schemas:
 
 #### Event Type Wrappers
 
@@ -501,20 +347,70 @@ Wrap the Event schema with domain-specific validation:
 **Shifts** (`Mosaic.Shifts.Shift`)
 ```elixir
 defmodule Mosaic.Shifts.Shift do
+  @moduledoc """
+  Shift-specific business logic and validations.
+  """
+  
   import Ecto.Changeset
+  import Mosaic.ChangesetHelpers
   alias Mosaic.Events.Event
+
+  @property_fields [:location, :department, :notes]
 
   def changeset(event, attrs) do
     event
-    |> Event.changeset(attrs)  # Use core schema
-    |> validate_shift_properties()  # Add domain validation
+    |> Event.changeset(attrs)
+    |> cast_properties(attrs, @property_fields)
+    |> validate_required([:end_time])
+    |> validate_shift_properties()
+  end
+
+  defp validate_shift_properties(changeset) do
+    case changeset.action do
+      nil -> changeset
+      _ ->
+        properties = get_field(changeset, :properties) || %{}
+        validate_property_presence(changeset, properties, "location", "Location is required")
+    end
   end
 end
 ```
+- Located at: `/mnt/project/shift.ex`
 
 **Employments** (`Mosaic.Employments.Employment`)
-- Wraps Event with employment-specific validation
-- Properties: `role`, `contract_type`, `salary`
+```elixir
+defmodule Mosaic.Employments.Employment do
+  @moduledoc """
+  Employment-specific business logic and validations.
+  """
+  
+  import Ecto.Changeset
+  import Mosaic.ChangesetHelpers
+  alias Mosaic.Events.Event
+
+  @property_fields [:role, :contract_type, :salary]
+
+  def changeset(event, attrs) do
+    event
+    |> Event.changeset(attrs)
+    |> cast_properties(attrs, @property_fields)
+    |> validate_employment_properties()
+  end
+
+  defp validate_employment_properties(changeset) do
+    case changeset.action do
+      nil -> changeset
+      _ ->
+        properties = get_field(changeset, :properties) || %{}
+        
+        changeset
+        |> validate_property_presence(properties, "contract_type", "Contract type is required")
+        |> validate_property_presence(properties, "role", "Role is required")
+    end
+  end
+end
+```
+- Located at: `/mnt/project/employment.ex`
 
 #### Entity Type Wrappers
 
@@ -523,6 +419,10 @@ Wrap the Entity schema with domain-specific validation:
 **Workers** (`Mosaic.Workers.Worker`)
 ```elixir
 defmodule Mosaic.Workers.Worker do
+  @moduledoc """
+  Domain-specific module for Worker entities.
+  """
+  
   import Ecto.Changeset
   alias Mosaic.Entities.Entity
 
@@ -533,14 +433,27 @@ defmodule Mosaic.Workers.Worker do
   end
 
   defp validate_worker_properties(changeset) do
-    # Worker-specific validation: name, email, phone
+    case get_field(changeset, :properties) do
+      %{} = props ->
+        changeset
+        |> validate_property_present(props, "name", "Name is required")
+        |> validate_property_present(props, "email", "Email is required")
+        |> validate_email_format(props)
+      _ ->
+        add_error(changeset, :properties, "must be a map")
+    end
   end
 end
 ```
+- Located at: `/mnt/project/worker.ex`
 
 **Locations** (`Mosaic.Locations.Location`)
 ```elixir
 defmodule Mosaic.Locations.Location do
+  @moduledoc """
+  Domain-specific module for Location entities.
+  """
+  
   import Ecto.Changeset
   alias Mosaic.Entities.Entity
 
@@ -551,23 +464,44 @@ defmodule Mosaic.Locations.Location do
   end
 
   defp validate_location_properties(changeset) do
-    # Location-specific validation: name, address, capacity
+    case get_field(changeset, :properties) do
+      %{} = props ->
+        changeset
+        |> validate_property_present(props, "name", "Name is required")
+        |> validate_property_present(props, "address", "Address is required")
+        |> validate_capacity(props)
+      _ ->
+        add_error(changeset, :properties, "must be a map")
+    end
   end
 end
 ```
+- Located at: `/mnt/project/location.ex`
 
 ### Context Modules
 
 Each domain wrapper has a corresponding context module for business operations:
 
 **Event Contexts:**
-- `Mosaic.Events` - Generic event operations (domain-agnostic)
-- `Mosaic.Shifts` - Shift-specific operations
-- `Mosaic.Employments` - Employment-specific operations
+- `Mosaic.Events` (at `/mnt/project/events.ex`) - Generic event operations (domain-agnostic)
+- `Mosaic.Shifts` (at `/mnt/project/shifts.ex`) - Shift-specific operations
+- `Mosaic.Employments` (at `/mnt/project/employments.ex`) - Employment-specific operations
 
 **Entity Contexts:**
-- `Mosaic.Workers` - Worker CRUD and business logic
-- `Mosaic.Locations` - Location CRUD and business logic
+- `Mosaic.Workers` (at `/mnt/project/workers.ex`) - Worker CRUD and business logic
+- `Mosaic.Locations` (at `/mnt/project/locations.ex`) - Location CRUD and business logic
+
+**Core Contexts:**
+- `Mosaic.Entities` (at `/mnt/project/entities.ex`) - Generic entity operations
+- `Mosaic.Participations` (at `/mnt/project/participations.ex`) - Participation management
+
+### Helper Modules
+
+**ChangesetHelpers** (`Mosaic.ChangesetHelpers`)
+- Located at: `/mnt/project/changeset_helpers.ex`
+- Provides shared functions for working with JSONB properties:
+  - `cast_properties/3` - Casts property fields into properties map
+  - `validate_property_presence/4` - Validates required properties
 
 ### Why This Pattern?
 
@@ -614,7 +548,7 @@ Map.put(attrs, :entity_type, "person")  # WRONG if attrs has string keys!
 This convention applies throughout:
 - Context functions (create_worker, create_employment, etc.)
 - Wrapper changesets (Worker.changeset, Location.changeset, etc.)
-- LiveView form components (form_to_event_attrs, etc.)
+- LiveView form components
 - Participation attributes
 
 ### Example: Adding a New Entity Type
@@ -701,4 +635,4 @@ See also:
 - [02-entities.md](02-entities.md) for entity wrapper pattern details
 - [03-event-types.md](03-event-types.md) for event type system
 - [08-properties-pattern.md](08-properties-pattern.md) for properties usage
-- [11-overlap-prevention.md](11-overlap-prevention.md) for temporal validation
+- [04-temporal-modeling.md](04-temporal-modeling.md) for temporal validation
