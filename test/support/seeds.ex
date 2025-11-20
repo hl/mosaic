@@ -119,10 +119,24 @@ defmodule Mosaic.Test.Seeds do
         name: "clock_period",
         category: "timekeeping",
         can_nest: false,
-        can_have_children: false,
+        can_have_children: true,
         requires_participation: true,
         schema: %{},
-        rules: %{},
+        rules: %{
+          "allowed_children" => ["payroll_piece"]
+        },
+        is_active: true
+      },
+      %{
+        name: "payroll_piece",
+        category: "payroll",
+        can_nest: false,
+        can_have_children: false,
+        requires_participation: false,
+        schema: %{},
+        rules: %{
+          "allowed_parents" => ["clock_period"]
+        },
         is_active: true
       }
     ]
