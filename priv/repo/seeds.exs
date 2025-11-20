@@ -102,6 +102,26 @@ event_types = [
       "allowed_statuses" => ["draft", "active", "archived"]
     },
     is_active: true
+  },
+  %{
+    name: "clock_event",
+    category: "timekeeping",
+    can_nest: false,
+    can_have_children: false,
+    requires_participation: true,
+    schema: %{},
+    rules: %{},
+    is_active: true
+  },
+  %{
+    name: "clock_period",
+    category: "timekeeping",
+    can_nest: false,
+    can_have_children: false,
+    requires_participation: true,
+    schema: %{},
+    rules: %{},
+    is_active: true
   }
 ]
 
