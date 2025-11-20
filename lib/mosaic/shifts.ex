@@ -177,6 +177,127 @@ defmodule Mosaic.Shifts do
   end
 
   @doc """
+  Adds a work period to an existing shift.
+
+  Attrs should include:
+  - start_time (required)
+  - end_time (required)
+  - properties (optional, can include notes, productivity_metrics, etc.)
+  """
+  def add_work_period(shift_id, attrs) do
+    Repo.transaction(fn ->
+      with {:ok, shift} <- validate_shift(shift_id),
+           :ok <- validate_child_in_shift(attrs, shift),
+           {:ok, event_type} <- Events.get_event_type_by_name("work_period"),
+           worker_id <- get_worker_id(shift),
+           event_attrs <- %{
+             "event_type_id" => event_type.id,
+             "parent_id" => shift_id,
+             "start_time" => attrs["start_time"] || attrs[:start_time],
+             "end_time" => attrs["end_time"] || attrs[:end_time],
+             "status" => attrs["status"] || attrs[:status] || "active",
+             "properties" => attrs["properties"] || attrs[:properties] || %{}
+           },
+           {:ok, event} <- Events.create_event(event_attrs),
+           participation_attrs <- %{
+             "participant_id" => worker_id,
+             "event_id" => event.id,
+             "participation_type" => "worker"
+           },
+           {:ok, _participation} <-
+             %Participation{}
+             |> Participation.changeset(participation_attrs)
+             |> Repo.insert() do
+        event
+      else
+        {:error, reason} -> Repo.rollback(reason)
+      end
+    end)
+  end
+
+  @doc """
+  Adds a break to an existing shift.
+
+  Attrs should include:
+  - start_time (required)
+  - end_time (required)
+  - is_paid (optional, defaults to false)
+  - properties (optional, can include break_type, location, etc.)
+  """
+  def add_break(shift_id, attrs) do
+    Repo.transaction(fn ->
+      with {:ok, shift} <- validate_shift(shift_id),
+           :ok <- validate_child_in_shift(attrs, shift),
+           {:ok, event_type} <- Events.get_event_type_by_name("break"),
+           worker_id <- get_worker_id(shift),
+           is_paid <- attrs["is_paid"] || attrs[:is_paid] || false,
+           properties <-
+             Map.merge(attrs["properties"] || attrs[:properties] || %{}, %{"is_paid" => is_paid}),
+           event_attrs <- %{
+             "event_type_id" => event_type.id,
+             "parent_id" => shift_id,
+             "start_time" => attrs["start_time"] || attrs[:start_time],
+             "end_time" => attrs["end_time"] || attrs[:end_time],
+             "status" => attrs["status"] || attrs[:status] || "active",
+             "properties" => properties
+           },
+           {:ok, event} <- Events.create_event(event_attrs),
+           participation_attrs <- %{
+             "participant_id" => worker_id,
+             "event_id" => event.id,
+             "participation_type" => "worker"
+           },
+           {:ok, _participation} <-
+             %Participation{}
+             |> Participation.changeset(participation_attrs)
+             |> Repo.insert() do
+        event
+      else
+        {:error, reason} -> Repo.rollback(reason)
+      end
+    end)
+  end
+
+  @doc """
+  Adds a task to an existing shift.
+
+  Attrs should include:
+  - start_time (required)
+  - end_time (required)
+  - properties (optional, can include task_name, description, priority, etc.)
+  """
+  def add_task(shift_id, attrs) do
+    Repo.transaction(fn ->
+      with {:ok, shift} <- validate_shift(shift_id),
+           :ok <- validate_child_in_shift(attrs, shift),
+           {:ok, event_type} <- Events.get_event_type_by_name("task"),
+           worker_id <- get_worker_id(shift),
+           event_attrs <- %{
+             "event_type_id" => event_type.id,
+             "parent_id" => shift_id,
+             "start_time" => attrs["start_time"] || attrs[:start_time],
+             "end_time" => attrs["end_time"] || attrs[:end_time],
+             "status" => attrs["status"] || attrs[:status] || "active",
+             "properties" => attrs["properties"] || attrs[:properties] || %{}
+           },
+           {:ok, event} <- Events.create_event(event_attrs),
+           participation_attrs <- %{
+             "participant_id" => worker_id,
+             "event_id" => event.id,
+             "participation_type" => "worker"
+           },
+           {:ok, _participation} <-
+             %Participation{}
+             |> Participation.changeset(participation_attrs)
+             |> Repo.insert() do
+        event
+      else
+        {:error, reason} -> Repo.rollback(reason)
+      end
+    end)
+  end
+
+  @doc """
   Auto-generates work periods and breaks for a shift.
   Adds a break after 4 hours if shift is longer than 4 hours.
   """
@@ -435,6 +556,28 @@ defmodule Mosaic.Shifts do
       not is_nil(schedule.end_time) and
           DateTime.compare(shift_end, schedule.end_time) == :gt ->
         {:error, "Shift ends after schedule period"}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp validate_child_in_shift(child_attrs, shift) do
+    child_start = child_attrs[:start_time] || child_attrs["start_time"]
+    child_end = child_attrs[:end_time] || child_attrs["end_time"]
+
+    cond do
+      is_nil(child_start) ->
+        {:error, "Start time is required"}
+
+      is_nil(child_end) ->
+        {:error, "End time is required"}
+
+      DateTime.compare(child_start, shift.start_time) == :lt ->
+        {:error, "Event starts before shift"}
+
+      DateTime.compare(child_end, shift.end_time) == :gt ->
+        {:error, "Event ends after shift"}
 
       true ->
         :ok

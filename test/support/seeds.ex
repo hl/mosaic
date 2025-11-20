@@ -38,7 +38,7 @@ defmodule Mosaic.Test.Seeds do
         requires_participation: true,
         schema: %{},
         rules: %{
-          "allowed_children" => ["work_period", "break"],
+          "allowed_children" => ["work_period", "break", "task"],
           "allowed_parents" => ["employment"]
         },
         is_active: true
@@ -65,6 +65,18 @@ defmodule Mosaic.Test.Seeds do
         rules: %{
           "allowed_parents" => ["shift"],
           "is_paid" => false
+        },
+        is_active: true
+      },
+      %{
+        name: "task",
+        category: "work",
+        can_nest: true,
+        can_have_children: false,
+        requires_participation: true,
+        schema: %{},
+        rules: %{
+          "allowed_parents" => ["shift"]
         },
         is_active: true
       },

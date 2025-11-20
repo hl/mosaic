@@ -2,6 +2,7 @@ defmodule Mosaic.ShiftsTest do
   use Mosaic.DataCase
 
   alias Mosaic.Shifts
+  alias Mosaic.Events
   alias Mosaic.Test.Seeds
   import Mosaic.Fixtures
 
@@ -567,6 +568,386 @@ defmodule Mosaic.ShiftsTest do
 
       assert length(shifts) == 1
       assert List.first(shifts).id == shift1.id
+    end
+  end
+
+  describe "add_work_period/2" do
+    test "adds work period to shift with valid attributes" do
+      worker = worker_fixture()
+      employment = employment_fixture(worker.id)
+      shift = shift_fixture(employment.id, worker.id)
+
+      # Use shift's times to create valid work period
+      work_period_start = shift.start_time
+      work_period_end = DateTime.add(shift.start_time, 4 * 3600, :second)
+
+      attrs = %{
+        "start_time" => work_period_start,
+        "end_time" => work_period_end,
+        "properties" => %{"notes" => "Morning shift"}
+      }
+
+      assert {:ok, work_period} = Shifts.add_work_period(shift.id, attrs)
+      assert work_period.start_time == work_period_start
+      assert work_period.end_time == work_period_end
+      assert work_period.parent_id == shift.id
+      assert work_period.properties["notes"] == "Morning shift"
+      assert work_period.status == "active"
+    end
+
+    test "validates work period is within shift boundaries" do
+      worker = worker_fixture()
+      employment = employment_fixture(worker.id)
+      shift = shift_fixture(employment.id, worker.id)
+
+      # Work period starts before shift
+      attrs = %{
+        "start_time" => DateTime.add(shift.start_time, -3600, :second),
+        "end_time" => DateTime.add(shift.start_time, 4 * 3600, :second)
+      }
+
+      assert {:error, reason} = Shifts.add_work_period(shift.id, attrs)
+      assert reason =~ "Event starts before shift"
+    end
+
+    test "validates work period does not end after shift" do
+      worker = worker_fixture()
+      employment = employment_fixture(worker.id)
+      shift = shift_fixture(employment.id, worker.id)
+
+      # Work period ends after shift
+      attrs = %{
+        "start_time" => DateTime.add(shift.end_time, -3600, :second),
+        "end_time" => DateTime.add(shift.end_time, 3600, :second)
+      }
+
+      assert {:error, reason} = Shifts.add_work_period(shift.id, attrs)
+      assert reason =~ "Event ends after shift"
+    end
+
+    test "requires start_time and end_time" do
+      worker = worker_fixture()
+      employment = employment_fixture(worker.id)
+      shift = shift_fixture(employment.id, worker.id)
+
+      attrs = %{"start_time" => shift.start_time}
+
+      assert {:error, reason} = Shifts.add_work_period(shift.id, attrs)
+      assert reason =~ "End time is required"
+    end
+
+    test "creates participation for worker" do
+      worker = worker_fixture()
+      employment = employment_fixture(worker.id)
+      shift = shift_fixture(employment.id, worker.id)
+
+      attrs = %{
+        "start_time" => shift.start_time,
+        "end_time" => DateTime.add(shift.start_time, 4 * 3600, :second)
+      }
+
+      assert {:ok, work_period} = Shifts.add_work_period(shift.id, attrs)
+
+      work_period_with_participations =
+        Events.get_event!(work_period.id, preload: :participations)
+
+      assert length(work_period_with_participations.participations) == 1
+
+      participation = List.first(work_period_with_participations.participations)
+      assert participation.participant_id == worker.id
+      assert participation.participation_type == "worker"
+    end
+  end
+
+  describe "add_break/2" do
+    test "adds break to shift with valid attributes" do
+      worker = worker_fixture()
+      employment = employment_fixture(worker.id)
+      shift = shift_fixture(employment.id, worker.id)
+
+      # Break in the middle of the shift
+      break_start = DateTime.add(shift.start_time, 3 * 3600, :second)
+      break_end = DateTime.add(break_start, 30 * 60, :second)
+
+      attrs = %{
+        "start_time" => break_start,
+        "end_time" => break_end,
+        "is_paid" => true,
+        "properties" => %{"break_type" => "lunch"}
+      }
+
+      assert {:ok, break_event} = Shifts.add_break(shift.id, attrs)
+      assert break_event.start_time == break_start
+      assert break_event.end_time == break_end
+      assert break_event.parent_id == shift.id
+      assert break_event.properties["is_paid"] == true
+      assert break_event.properties["break_type"] == "lunch"
+      assert break_event.status == "active"
+    end
+
+    test "defaults is_paid to false" do
+      worker = worker_fixture()
+      employment = employment_fixture(worker.id)
+      shift = shift_fixture(employment.id, worker.id)
+
+      break_start = DateTime.add(shift.start_time, 3 * 3600, :second)
+      break_end = DateTime.add(break_start, 30 * 60, :second)
+
+      attrs = %{
+        "start_time" => break_start,
+        "end_time" => break_end
+      }
+
+      assert {:ok, break_event} = Shifts.add_break(shift.id, attrs)
+      assert break_event.properties["is_paid"] == false
+    end
+
+    test "validates break is within shift boundaries" do
+      worker = worker_fixture()
+      employment = employment_fixture(worker.id)
+      shift = shift_fixture(employment.id, worker.id)
+
+      # Break starts before shift
+      attrs = %{
+        "start_time" => DateTime.add(shift.start_time, -1800, :second),
+        "end_time" => shift.start_time
+      }
+
+      assert {:error, reason} = Shifts.add_break(shift.id, attrs)
+      assert reason =~ "Event starts before shift"
+    end
+
+    test "validates break does not end after shift" do
+      worker = worker_fixture()
+      employment = employment_fixture(worker.id)
+      shift = shift_fixture(employment.id, worker.id)
+
+      # Break ends after shift
+      attrs = %{
+        "start_time" => DateTime.add(shift.end_time, -900, :second),
+        "end_time" => DateTime.add(shift.end_time, 900, :second)
+      }
+
+      assert {:error, reason} = Shifts.add_break(shift.id, attrs)
+      assert reason =~ "Event ends after shift"
+    end
+
+    test "requires start_time and end_time" do
+      worker = worker_fixture()
+      employment = employment_fixture(worker.id)
+      shift = shift_fixture(employment.id, worker.id)
+
+      attrs = %{"start_time" => DateTime.add(shift.start_time, 3 * 3600, :second)}
+
+      assert {:error, reason} = Shifts.add_break(shift.id, attrs)
+      assert reason =~ "End time is required"
+    end
+
+    test "creates participation for worker" do
+      worker = worker_fixture()
+      employment = employment_fixture(worker.id)
+      shift = shift_fixture(employment.id, worker.id)
+
+      break_start = DateTime.add(shift.start_time, 3 * 3600, :second)
+      break_end = DateTime.add(break_start, 30 * 60, :second)
+
+      attrs = %{
+        "start_time" => break_start,
+        "end_time" => break_end
+      }
+
+      assert {:ok, break_event} = Shifts.add_break(shift.id, attrs)
+
+      break_with_participations = Events.get_event!(break_event.id, preload: :participations)
+
+      assert length(break_with_participations.participations) == 1
+
+      participation = List.first(break_with_participations.participations)
+      assert participation.participant_id == worker.id
+      assert participation.participation_type == "worker"
+    end
+
+    test "works with schedule-based shifts" do
+      location = location_fixture()
+      worker = worker_fixture()
+
+      schedule =
+        schedule_fixture(location.id, %{
+          "start_time" => ~U[2024-01-01 00:00:00Z],
+          "end_time" => ~U[2024-01-31 23:59:59Z]
+        })
+
+      {:ok, {shift, _}} =
+        Shifts.create_shift_in_schedule(schedule.id, worker.id, %{
+          "start_time" => ~U[2024-01-15 09:00:00Z],
+          "end_time" => ~U[2024-01-15 17:00:00Z]
+        })
+
+      attrs = %{
+        "start_time" => ~U[2024-01-15 12:00:00Z],
+        "end_time" => ~U[2024-01-15 12:30:00Z],
+        "is_paid" => true
+      }
+
+      assert {:ok, break_event} = Shifts.add_break(shift.id, attrs)
+      assert break_event.parent_id == shift.id
+      assert break_event.properties["is_paid"] == true
+    end
+  end
+
+  describe "add_task/2" do
+    test "adds task to shift with valid attributes" do
+      worker = worker_fixture()
+      employment = employment_fixture(worker.id)
+      shift = shift_fixture(employment.id, worker.id)
+
+      task_start = DateTime.add(shift.start_time, 1 * 3600, :second)
+      task_end = DateTime.add(task_start, 2 * 3600, :second)
+
+      attrs = %{
+        "start_time" => task_start,
+        "end_time" => task_end,
+        "properties" => %{
+          "task_name" => "Inventory Count",
+          "description" => "Count warehouse items",
+          "priority" => "high"
+        }
+      }
+
+      assert {:ok, task} = Shifts.add_task(shift.id, attrs)
+      assert task.start_time == task_start
+      assert task.end_time == task_end
+      assert task.parent_id == shift.id
+      assert task.properties["task_name"] == "Inventory Count"
+      assert task.properties["description"] == "Count warehouse items"
+      assert task.properties["priority"] == "high"
+      assert task.status == "active"
+    end
+
+    test "validates task is within shift boundaries" do
+      worker = worker_fixture()
+      employment = employment_fixture(worker.id)
+      shift = shift_fixture(employment.id, worker.id)
+
+      # Task starts before shift
+      attrs = %{
+        "start_time" => DateTime.add(shift.start_time, -3600, :second),
+        "end_time" => DateTime.add(shift.start_time, 3600, :second)
+      }
+
+      assert {:error, reason} = Shifts.add_task(shift.id, attrs)
+      assert reason =~ "Event starts before shift"
+    end
+
+    test "validates task does not end after shift" do
+      worker = worker_fixture()
+      employment = employment_fixture(worker.id)
+      shift = shift_fixture(employment.id, worker.id)
+
+      # Task ends after shift
+      attrs = %{
+        "start_time" => DateTime.add(shift.end_time, -2 * 3600, :second),
+        "end_time" => DateTime.add(shift.end_time, 3600, :second)
+      }
+
+      assert {:error, reason} = Shifts.add_task(shift.id, attrs)
+      assert reason =~ "Event ends after shift"
+    end
+
+    test "requires start_time and end_time" do
+      worker = worker_fixture()
+      employment = employment_fixture(worker.id)
+      shift = shift_fixture(employment.id, worker.id)
+
+      attrs = %{"start_time" => DateTime.add(shift.start_time, 1 * 3600, :second)}
+
+      assert {:error, reason} = Shifts.add_task(shift.id, attrs)
+      assert reason =~ "End time is required"
+    end
+
+    test "creates participation for worker" do
+      worker = worker_fixture()
+      employment = employment_fixture(worker.id)
+      shift = shift_fixture(employment.id, worker.id)
+
+      task_start = DateTime.add(shift.start_time, 1 * 3600, :second)
+      task_end = DateTime.add(task_start, 2 * 3600, :second)
+
+      attrs = %{
+        "start_time" => task_start,
+        "end_time" => task_end,
+        "properties" => %{"task_name" => "Receiving"}
+      }
+
+      assert {:ok, task} = Shifts.add_task(shift.id, attrs)
+
+      task_with_participations = Events.get_event!(task.id, preload: :participations)
+
+      assert length(task_with_participations.participations) == 1
+
+      participation = List.first(task_with_participations.participations)
+      assert participation.participant_id == worker.id
+      assert participation.participation_type == "worker"
+    end
+
+    test "works with schedule-based shifts" do
+      location = location_fixture()
+      worker = worker_fixture()
+
+      schedule =
+        schedule_fixture(location.id, %{
+          "start_time" => ~U[2024-01-01 00:00:00Z],
+          "end_time" => ~U[2024-01-31 23:59:59Z]
+        })
+
+      {:ok, {shift, _}} =
+        Shifts.create_shift_in_schedule(schedule.id, worker.id, %{
+          "start_time" => ~U[2024-01-15 09:00:00Z],
+          "end_time" => ~U[2024-01-15 17:00:00Z]
+        })
+
+      attrs = %{
+        "start_time" => ~U[2024-01-15 10:00:00Z],
+        "end_time" => ~U[2024-01-15 12:00:00Z],
+        "properties" => %{"task_name" => "Unloading"}
+      }
+
+      assert {:ok, task} = Shifts.add_task(shift.id, attrs)
+      assert task.parent_id == shift.id
+      assert task.properties["task_name"] == "Unloading"
+    end
+
+    test "allows multiple tasks per shift" do
+      worker = worker_fixture()
+      employment = employment_fixture(worker.id)
+      shift = shift_fixture(employment.id, worker.id)
+
+      # First task in first half of shift
+      task1_start = shift.start_time
+      task1_end = DateTime.add(shift.start_time, 3 * 3600, :second)
+
+      # Second task in second half of shift
+      task2_start = DateTime.add(shift.start_time, 4 * 3600, :second)
+      task2_end = shift.end_time
+
+      task1_attrs = %{
+        "start_time" => task1_start,
+        "end_time" => task1_end,
+        "properties" => %{"task_name" => "Morning task"}
+      }
+
+      task2_attrs = %{
+        "start_time" => task2_start,
+        "end_time" => task2_end,
+        "properties" => %{"task_name" => "Afternoon task"}
+      }
+
+      assert {:ok, task1} = Shifts.add_task(shift.id, task1_attrs)
+      assert {:ok, task2} = Shifts.add_task(shift.id, task2_attrs)
+
+      assert task1.properties["task_name"] == "Morning task"
+      assert task2.properties["task_name"] == "Afternoon task"
+      assert task1.id != task2.id
     end
   end
 end
