@@ -22,7 +22,7 @@ defmodule Mosaic.Workers do
   """
   def list_workers do
     from(e in Entity,
-      where: e.entity_type == "person",
+      where: e.entity_type == ^Worker.entity_type(),
       order_by: [asc: fragment("?->>'name'", e.properties)]
     )
     |> Repo.all()
@@ -45,7 +45,7 @@ defmodule Mosaic.Workers do
   def get_worker!(id) do
     entity = Repo.get!(Entity, id) |> Repo.preload(participations: [:event])
 
-    if entity.entity_type != "person" do
+    if entity.entity_type != Worker.entity_type() do
       raise Ecto.NoResultsError, queryable: Entity
     end
 

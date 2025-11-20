@@ -7,8 +7,13 @@ defmodule Mosaic.Workers.Worker do
   employment and shift events.
   """
 
+  @behaviour Mosaic.Entities.EntityWrapper
+
   import Ecto.Changeset
   alias Mosaic.Entities.Entity
+
+  @impl Mosaic.Entities.EntityWrapper
+  def entity_type, do: "person"
 
   @doc """
   Validates worker-specific properties and returns a changeset.
@@ -24,7 +29,7 @@ defmodule Mosaic.Workers.Worker do
   """
   def changeset(%Entity{} = entity, attrs) do
     entity
-    |> Entity.changeset(Map.put(attrs, "entity_type", "person"))
+    |> Entity.changeset(Map.put(attrs, "entity_type", entity_type()))
     |> validate_worker_properties()
   end
 
@@ -32,7 +37,7 @@ defmodule Mosaic.Workers.Worker do
   Creates a new worker entity struct with default values.
   """
   def new(attrs \\ %{}) do
-    %Entity{entity_type: "person", properties: %{}}
+    %Entity{entity_type: entity_type(), properties: %{}}
     |> changeset(attrs)
   end
 
@@ -72,7 +77,7 @@ defmodule Mosaic.Workers.Worker do
   @doc """
   Extracts worker properties from an entity for display/forms.
   """
-  def from_entity(%Entity{entity_type: "person", properties: properties}) do
+  def from_entity(%Entity{entity_type: type, properties: properties}) when type == "person" do
     %{
       name: Map.get(properties, "name"),
       email: Map.get(properties, "email"),
@@ -83,7 +88,7 @@ defmodule Mosaic.Workers.Worker do
   end
 
   def from_entity(%Entity{}) do
-    raise ArgumentError, "Entity must be of type 'person' to convert to Worker"
+    raise ArgumentError, "Entity must be of type '#{entity_type()}' to convert to Worker"
   end
 
   @doc """

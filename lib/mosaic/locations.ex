@@ -15,6 +15,8 @@ defmodule Mosaic.Locations do
   alias Mosaic.Events.EventType
   alias Mosaic.Participations.Participation
 
+  @location_membership_event_type "location_membership"
+
   @doc """
   Returns the list of all locations.
 
@@ -26,7 +28,7 @@ defmodule Mosaic.Locations do
   """
   def list_locations do
     from(e in Entity,
-      where: e.entity_type == "location",
+      where: e.entity_type == ^Location.entity_type(),
       order_by: [asc: fragment("?->>'name'", e.properties)]
     )
     |> Repo.all()
@@ -49,7 +51,7 @@ defmodule Mosaic.Locations do
   def get_location!(id) do
     entity = Repo.get!(Entity, id)
 
-    if entity.entity_type != "location" do
+    if entity.entity_type != Location.entity_type() do
       raise Ecto.NoResultsError, queryable: Entity
     end
 
@@ -134,7 +136,7 @@ defmodule Mosaic.Locations do
     search_pattern = "%#{query_string}%"
 
     from(e in Entity,
-      where: e.entity_type == "location",
+      where: e.entity_type == ^Location.entity_type(),
       where:
         ilike(fragment("?->>'name'", e.properties), ^search_pattern) or
           ilike(fragment("?->>'address'", e.properties), ^search_pattern),
@@ -154,7 +156,7 @@ defmodule Mosaic.Locations do
   """
   def get_locations_by_ids(ids) when is_list(ids) do
     from(e in Entity,
-      where: e.entity_type == "location" and e.id in ^ids,
+      where: e.entity_type == ^Location.entity_type() and e.id in ^ids,
       order_by: [asc: fragment("?->>'name'", e.properties)]
     )
     |> Repo.all()
@@ -171,7 +173,7 @@ defmodule Mosaic.Locations do
   """
   def get_locations_with_capacity(min_capacity) when is_integer(min_capacity) do
     from(e in Entity,
-      where: e.entity_type == "location",
+      where: e.entity_type == ^Location.entity_type(),
       where: fragment("(?->>'capacity')::integer >= ?", e.properties, ^min_capacity),
       order_by: [asc: fragment("?->>'name'", e.properties)]
     )
@@ -203,7 +205,7 @@ defmodule Mosaic.Locations do
       with {:ok, _child} <- validate_location_exists(child_id),
            {:ok, _parent} <- validate_location_exists(parent_id),
            :ok <- validate_no_circular_reference(child_id, parent_id),
-           {:ok, event_type} <- Events.get_event_type_by_name("location_membership"),
+           {:ok, event_type} <- Events.get_event_type_by_name(@location_membership_event_type),
            attrs <- %{
              "event_type_id" => event_type.id,
              "start_time" => start_time,
@@ -266,7 +268,7 @@ defmodule Mosaic.Locations do
         on: p_child.event_id == e.id,
         join: p_parent in Participation,
         on: p_parent.event_id == e.id,
-        where: et.name == "location_membership",
+        where: et.name == ^@location_membership_event_type,
         where: p_child.participant_id == ^location_id,
         where: p_child.participation_type == "child_location",
         where: p_parent.participation_type == "parent_location",
@@ -306,7 +308,7 @@ defmodule Mosaic.Locations do
         on: p_parent.event_id == e.id,
         join: p_child in Participation,
         on: p_child.event_id == e.id,
-        where: et.name == "location_membership",
+        where: et.name == ^@location_membership_event_type,
         where: p_parent.participant_id == ^location_id,
         where: p_parent.participation_type == "parent_location",
         where: p_child.participation_type == "child_location",
@@ -341,7 +343,7 @@ defmodule Mosaic.Locations do
         on: e.event_type_id == et.id,
         join: p_child in Participation,
         on: p_child.event_id == e.id,
-        where: et.name == "location_membership",
+        where: et.name == ^@location_membership_event_type,
         where: p_child.participant_id == ^location_id,
         where: p_child.participation_type == "child_location",
         where: e.start_time <= ^now,
@@ -378,7 +380,7 @@ defmodule Mosaic.Locations do
         {:error, "Location not found: #{location_id}"}
 
       entity ->
-        if entity.entity_type == "location" do
+        if entity.entity_type == Location.entity_type() do
           {:ok, entity}
         else
           {:error, "Entity is not a location: #{location_id}"}

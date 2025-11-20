@@ -3,12 +3,17 @@ defmodule Mosaic.Shifts.Shift do
   Shift-specific business logic and validations.
   """
 
+  @behaviour Mosaic.Events.EventWrapper
+
   import Ecto.Changeset
   import Mosaic.ChangesetHelpers
   alias Mosaic.Events.Event
 
   # Define which properties should be exposed as form fields
   @property_fields [:location, :department, :notes]
+
+  @impl Mosaic.Events.EventWrapper
+  def event_type, do: "shift"
 
   @doc """
   Shift-specific changeset with custom validations.

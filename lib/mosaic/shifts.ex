@@ -10,6 +10,7 @@ defmodule Mosaic.Shifts do
   alias Mosaic.Events
   alias Mosaic.Participations.Participation
   alias Mosaic.Shifts.Shift
+  alias Mosaic.Employments.Employment
 
   @doc """
   Creates a shift under an employment period.
@@ -27,7 +28,7 @@ defmodule Mosaic.Shifts do
       with {:ok, employment} <- validate_employment(employment_id),
            :ok <- validate_shift_in_employment(attrs, employment),
            :ok <- validate_no_shift_overlap(worker_id, attrs),
-           {:ok, event_type} <- Events.get_event_type_by_name("shift"),
+           {:ok, event_type} <- Events.get_event_type_by_name(Shift.event_type()),
            attrs <-
              Map.merge(attrs, %{"event_type_id" => event_type.id, "parent_id" => employment_id}),
            {:ok, shift} <- Events.create_event(attrs),
@@ -95,7 +96,7 @@ defmodule Mosaic.Shifts do
   Lists all shifts.
   """
   def list_shifts do
-    Events.list_events_by_type("shift",
+    Events.list_events_by_type(Shift.event_type(),
       preload: [:event_type, :parent, :children, participations: :participant]
     )
   end
@@ -106,7 +107,7 @@ defmodule Mosaic.Shifts do
   def list_shifts_for_employment(employment_id) do
     from(e in Event,
       join: et in assoc(e, :event_type),
-      where: et.name == "shift" and e.parent_id == ^employment_id,
+      where: et.name == ^Shift.event_type() and e.parent_id == ^employment_id,
       order_by: [asc: e.start_time],
       preload: [:event_type, :children, participations: :participant]
     )
@@ -122,7 +123,7 @@ defmodule Mosaic.Shifts do
         preload: [:event_type, :parent, :children, participations: :participant]
       )
 
-    Events.list_events_for_participant("shift", worker_id, opts)
+    Events.list_events_for_participant(Shift.event_type(), worker_id, opts)
   end
 
   @doc """
@@ -292,7 +293,7 @@ defmodule Mosaic.Shifts do
       join: et in assoc(e, :event_type),
       join: p in assoc(e, :participations),
       where:
-        et.name == "shift" and
+        et.name == ^Shift.event_type() and
           p.participant_id == ^worker_id and
           e.status != "cancelled"
   end
@@ -354,11 +355,13 @@ defmodule Mosaic.Shifts do
   end
 
   defp validate_employment(employment_id) do
-    Events.validate_event_type(employment_id, "employment")
+    Events.validate_event_type(employment_id, Employment.event_type())
   end
 
   defp validate_shift(shift_id) do
-    Events.validate_event_type(shift_id, "shift", preload: [:event_type, :participations])
+    Events.validate_event_type(shift_id, Shift.event_type(),
+      preload: [:event_type, :participations]
+    )
   end
 
   defp get_worker_id(shift) do

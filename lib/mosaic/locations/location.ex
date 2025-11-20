@@ -6,8 +6,13 @@ defmodule Mosaic.Locations.Location do
   and validation. Locations can participate in events (e.g., shifts happen at locations).
   """
 
+  @behaviour Mosaic.Entities.EntityWrapper
+
   import Ecto.Changeset
   alias Mosaic.Entities.Entity
+
+  @impl Mosaic.Entities.EntityWrapper
+  def entity_type, do: "location"
 
   @doc """
   Validates location-specific properties and returns a changeset.
@@ -23,7 +28,7 @@ defmodule Mosaic.Locations.Location do
   """
   def changeset(%Entity{} = entity, attrs) do
     entity
-    |> Entity.changeset(Map.put(attrs, "entity_type", "location"))
+    |> Entity.changeset(Map.put(attrs, "entity_type", entity_type()))
     |> validate_location_properties()
   end
 
@@ -31,7 +36,7 @@ defmodule Mosaic.Locations.Location do
   Creates a new location entity struct with default values.
   """
   def new(attrs \\ %{}) do
-    %Entity{entity_type: "location", properties: %{}}
+    %Entity{entity_type: entity_type(), properties: %{}}
     |> changeset(attrs)
   end
 
@@ -71,7 +76,7 @@ defmodule Mosaic.Locations.Location do
   @doc """
   Extracts location properties from an entity for display/forms.
   """
-  def from_entity(%Entity{entity_type: "location", properties: properties}) do
+  def from_entity(%Entity{entity_type: type, properties: properties}) when type == "location" do
     %{
       name: Map.get(properties, "name"),
       address: Map.get(properties, "address"),
@@ -82,7 +87,7 @@ defmodule Mosaic.Locations.Location do
   end
 
   def from_entity(%Entity{}) do
-    raise ArgumentError, "Entity must be of type 'location' to convert to Location"
+    raise ArgumentError, "Entity must be of type '#{entity_type()}' to convert to Location"
   end
 
   @doc """

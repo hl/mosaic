@@ -23,7 +23,7 @@ defmodule Mosaic.Employments do
   """
   def create_employment(worker_id, attrs \\ %{}) do
     Repo.transaction(fn ->
-      with {:ok, event_type} <- Events.get_event_type_by_name("employment"),
+      with {:ok, event_type} <- Events.get_event_type_by_name(Employment.event_type()),
            attrs <- Map.put(attrs, "event_type_id", event_type.id),
            {:ok, event} <- Events.create_event(attrs),
            :ok <- validate_no_overlapping_employments(worker_id, event, nil),
@@ -80,7 +80,7 @@ defmodule Mosaic.Employments do
   Lists all employment periods.
   """
   def list_employments do
-    Events.list_events_by_type("employment",
+    Events.list_events_by_type(Employment.event_type(),
       preload: [:event_type, participations: :participant],
       order_by: [desc: :start_time]
     )
@@ -90,7 +90,7 @@ defmodule Mosaic.Employments do
   Lists all employment periods for a worker.
   """
   def list_employments_for_worker(worker_id) do
-    Events.list_events_for_participant("employment", worker_id,
+    Events.list_events_for_participant(Employment.event_type(), worker_id,
       preload: [:event_type, participations: :participant]
     )
     # Events.list_events_for_participant orders by asc, but we want desc for employments
@@ -106,7 +106,7 @@ defmodule Mosaic.Employments do
         join: et in assoc(e, :event_type),
         join: p in assoc(e, :participations),
         where:
-          et.name == "employment" and
+          et.name == ^Employment.event_type() and
             p.participant_id == ^worker_id and
             e.status == "active",
         select: count(e.id)
@@ -140,7 +140,7 @@ defmodule Mosaic.Employments do
       join: et in assoc(e, :event_type),
       join: p in assoc(e, :participations),
       where:
-        et.name == "employment" and
+        et.name == ^Employment.event_type() and
           p.participant_id == ^worker_id and
           e.status == "active"
   end

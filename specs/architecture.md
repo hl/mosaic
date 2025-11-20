@@ -89,6 +89,80 @@ Mosaic.Workers.create_worker(%{
 └─────────────────────────────────────────────────────┘
 ```
 
+## Wrapper Behaviors and Type Functions
+
+All wrapper modules must implement behaviors that enforce type declaration:
+
+### Event Wrappers
+
+Event wrappers implement `Mosaic.Events.EventWrapper` behavior:
+
+```elixir
+defmodule Mosaic.Shifts.Shift do
+  @behaviour Mosaic.Events.EventWrapper
+
+  @impl Mosaic.Events.EventWrapper
+  def event_type, do: "shift"
+
+  def changeset(event, attrs) do
+    # Shift-specific validation
+  end
+end
+```
+
+### Entity Wrappers
+
+Entity wrappers implement `Mosaic.Entities.EntityWrapper` behavior:
+
+```elixir
+defmodule Mosaic.Workers.Worker do
+  @behaviour Mosaic.Entities.EntityWrapper
+
+  @impl Mosaic.Entities.EntityWrapper
+  def entity_type, do: "person"
+
+  def changeset(entity, attrs) do
+    # Worker-specific validation
+  end
+end
+```
+
+### Using Type Functions in Contexts
+
+Domain contexts use these type functions instead of hardcoded strings:
+
+```elixir
+defmodule Mosaic.Shifts do
+  alias Mosaic.Shifts.Shift
+  alias Mosaic.Employments.Employment
+
+  def create_shift(employment_id, worker_id, attrs) do
+    with {:ok, event_type} <- Events.get_event_type_by_name(Shift.event_type()),
+         {:ok, employment} <- Events.validate_event_type(employment_id, Employment.event_type()) do
+      # Create shift...
+    end
+  end
+
+  def list_shifts do
+    Events.list_events_by_type(Shift.event_type())
+  end
+
+  defp validate_no_overlap(worker_id, attrs) do
+    from e in Event,
+      join: et in assoc(e, :event_type),
+      where: et.name == ^Shift.event_type()
+    # ...
+  end
+end
+```
+
+### Why Behaviors Matter
+
+1. **Compile-time enforcement**: Elixir compiler warns if a wrapper doesn't implement `event_type/0` or `entity_type/0`
+2. **No magic strings**: Type names are defined once in wrapper modules
+3. **Easy refactoring**: Change type name in one place, queries update automatically
+4. **Self-documenting**: `Shift.event_type()` is clearer than `"shift"`
+
 ## Why This Matters
 
 ### 1. Business Logic Encapsulation
